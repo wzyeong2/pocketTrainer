@@ -141,6 +141,7 @@ class MainActivity : ComponentActivity() {
                                 coachWorkout = ::coachWorkout,
                                 loadSplits = ::loadSplits,
                                 dailyCoach = ::dailyCoach,
+                                generateProgram = ::generateProgram,
                             )
                         }
                         if (showSplash.value) SplashScreen { showSplash.value = false }
@@ -182,6 +183,19 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val s = try { repo.splitsFor(w) } catch (e: Exception) { emptyList() }
             onResult(s)
+        }
+    }
+
+    /** AI 주간 프로그램 생성 (기록+프로필 기반) → 성공 시 저장 */
+    private fun generateProgram(onResult: (Result<String>) -> Unit) {
+        val provider = store.provider
+        val key = store.keyFor(provider)
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        store.recordAiCall()
+        lifecycleScope.launch {
+            val r = AiCoach.generateProgram(provider, key, athleteContext())
+            r.onSuccess { store.programJson = it; store.programDate = java.time.LocalDate.now().toString() }
+            onResult(r)
         }
     }
 
@@ -275,6 +289,7 @@ fun MainScreen(
     coachWorkout: (WorkoutRecord, String, (Result<String>) -> Unit) -> Unit,
     loadSplits: (WorkoutRecord, (List<Split>) -> Unit) -> Unit,
     dailyCoach: (List<WorkoutRecord>, (Result<String>) -> Unit) -> Unit,
+    generateProgram: ((Result<String>) -> Unit) -> Unit,
 ) {
     var filter by remember { mutableStateOf<ExerciseType?>(null) }
     var dailyDialog by remember { mutableStateOf(false) }
@@ -282,6 +297,9 @@ fun MainScreen(
     var dailyLoading by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var program by remember { mutableStateOf(ProgramParser.parse(store.programJson)) }
+    var programLoading by remember { mutableStateOf(false) }
+    var programErr by remember { mutableStateOf<String?>(null) }
     var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
     var month by remember { mutableStateOf(YearMonth.now()) }
     var detail by remember { mutableStateOf<WorkoutRecord?>(null) }
@@ -335,6 +353,43 @@ fun MainScreen(
             onPrev = { month = month.minusMonths(1) },
             onNext = { month = month.plusMonths(1) },
             onSelect = { selectedDate = if (selectedDate == it) null else it })
+
+        // AI 주간 프로그램 (기록 5개 이상)
+        val runCount = state.workouts.count { it.type == ExerciseType.RUNNING }
+        if (runCount >= 5) {
+            Card { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📋 AI 주간 프로그램", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (programLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+                if (program.isEmpty() && !programLoading)
+                    Text("최근 기록을 바탕으로 이번 주 훈련 3회를 만들어줄게.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                program.forEach { s ->
+                    Column(Modifier.padding(top = 4.dp)) {
+                        Text("• ${s.title}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        if (s.focus.isNotBlank()) Text("  ${s.focus}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        s.segments.forEach { seg ->
+                            val tp = if (seg.targetPaceSec > 0) " @${formatPace(seg.targetPaceSec)}" else ""
+                            val th = if (seg.targetHr > 0) " ·${seg.targetHr}bpm" else ""
+                            Text("   - ${seg.label} ${seg.durationSec / 60}분$tp$th", fontSize = 12.sp)
+                        }
+                    }
+                }
+                programErr?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                Button(onClick = {
+                    programLoading = true; programErr = null
+                    generateProgram { r ->
+                        programLoading = false
+                        r.onSuccess {
+                            val parsed = ProgramParser.parse(it)
+                            if (parsed.isEmpty()) programErr = "형식 파싱 실패 — 다시 만들어줘" else program = parsed
+                        }.onFailure { programErr = it.message }
+                    }
+                }, enabled = !programLoading, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (program.isEmpty()) "✨ 이번 주 프로그램 만들기" else "🔄 프로그램 새로 만들기")
+                }
+            } }
+        }
 
         if (state.loading) {
             Row(verticalAlignment = Alignment.CenterVertically) {

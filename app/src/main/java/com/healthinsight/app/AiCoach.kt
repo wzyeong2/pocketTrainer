@@ -41,6 +41,22 @@ object AiCoach {
         Result.failure(lastError ?: RuntimeException("네트워크 오류로 실패했어요"))
     }
 
+    /** 선수 정보 기반 주간 러닝 프로그램 생성 (JSON 원본 반환) */
+    suspend fun generateProgram(provider: String, apiKey: String, profile: String): Result<String> {
+        val prompt = buildString {
+            appendLine("너는 러닝 코치야. 아래 선수 정보를 바탕으로 '이번 주 러닝 훈련 3회' 프로그램을 설계해.")
+            appendLine()
+            append(profile)
+            appendLine()
+            appendLine("반드시 JSON만 출력해 (설명·인사·마크다운·코드펜스 전부 금지).")
+            appendLine("형식:")
+            appendLine("{\"sessions\":[{\"title\":\"화 - 이지런\",\"focus\":\"유산소 지구력\",\"segments\":[{\"label\":\"워밍업 걷기\",\"durationSec\":300,\"targetPaceSec\":0,\"targetHr\":0},{\"label\":\"이지런\",\"durationSec\":1500,\"targetPaceSec\":390,\"targetHr\":142}]}]}")
+            appendLine("규칙: durationSec=초, targetPaceSec=초/km(없으면 0), targetHr=bpm(없으면 0).")
+            appendLine("세션 정확히 3개. 각 세션은 워밍업·메인·쿨다운 등 2~5구간. 사용자 레벨·목표·부상·고도보정·심박존을 반영하고 무리한 부하는 금지.")
+        }
+        return generate(provider, apiKey, prompt, null)
+    }
+
     /** 429/quota 등 원시 오류를 사용자 친화 메시지로 변환 */
     private fun friendlyError(raw: String): String {
         val low = raw.lowercase()

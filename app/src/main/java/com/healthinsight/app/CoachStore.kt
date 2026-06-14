@@ -37,6 +37,14 @@ class CoachStore(context: Context) {
         get() = prefs.getString("athlete_profile", "") ?: ""
         set(v) = prefs.edit().putString("athlete_profile", v).apply()
 
+    /** AI가 만든 주간 프로그램 (원본 JSON) + 생성일 */
+    var programJson: String
+        get() = prefs.getString("program_json", "") ?: ""
+        set(v) = prefs.edit().putString("program_json", v).apply()
+    var programDate: String
+        get() = prefs.getString("program_date", "") ?: ""
+        set(v) = prefs.edit().putString("program_date", v).apply()
+
     /** 운동별 코칭 결과 */
     fun getCoaching(id: Long): String? = prefs.getString("coach_$id", null)
     fun setCoaching(id: Long, text: String) = prefs.edit().putString("coach_$id", text).apply()
