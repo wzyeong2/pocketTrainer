@@ -1,0 +1,318 @@
+package com.healthinsight.app
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.IBinder
+import android.speech.tts.TextToSpeech
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/** 라이브 러닝 코치 공유 상태 (UI ↔ 서비스). Compose State라 UI가 자동 갱신됨. */
+object LiveCoach {
+    var phase by mutableStateOf("idle")   // idle / running / finished
+    var distM by mutableStateOf(0.0)
+    var elapsedSec by mutableStateOf(0L)
+    var curPace by mutableStateOf(0)
+    var avgPace by mutableStateOf(0)
+    var kmDone by mutableStateOf(0)
+    var cue by mutableStateOf("코칭 준비 중...")
+    var targetPace by mutableStateOf(330)
+    var simPace by mutableStateOf(360)
+    var mode by mutableStateOf("sim")     // sim / gps
+    var voice by mutableStateOf(true)
+    var aiOn by mutableStateOf(false)
+
+    // 목표: free / pace / distance / time / interval
+    var goalType by mutableStateOf("pace")
+    var goalDistanceKm by mutableStateOf(5.0)
+    var goalTimeMin by mutableStateOf(30)
+    var intervalWorkSec by mutableStateOf(60)
+    var intervalRestSec by mutableStateOf(90)
+    var intervalSets by mutableStateOf(6)
+    var intervalLabel by mutableStateOf("")   // 현재 인터벌 상태 표시 (예: "빠르게 3/6")
+    var targetHr by mutableStateOf(145)        // 심박존 목표
+}
+
+/**
+ * 라이브 러닝 코치를 포그라운드 서비스로 실행 → 화면 꺼지거나 폰이 벨트/주머니에 있어도
+ * GPS 추적 + 음성 코칭이 계속 돌아간다. (블루투스 이어폰으로 음성 출력)
+ */
+class LiveCoachService : Service() {
+    private var tts: TextToSpeech? = null
+    private var scope: CoroutineScope? = null
+    private var lm: LocationManager? = null
+    private var listener: LocationListener? = null
+    private var startTs = 0L
+    private var lastCueMs = 0L
+    private var kmSplitSec = 0.0
+    private var lastLoc: Location? = null
+    private val window = ArrayDeque<Pair<Long, Double>>()
+    private var goalAnnounced = false
+    private var lastIntervalPhase = ""
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val ch = NotificationChannel("live_coach", "라이브 러닝 코치", NotificationManager.IMPORTANCE_LOW)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+        tts = TextToSpeech(this) { st -> if (st == TextToSpeech.SUCCESS) tts?.language = Locale.KOREAN }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP") { finishRun(); return START_NOT_STICKY }
+        val type = if (LiveCoach.mode == "gps") ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        ServiceCompat.startForeground(this, 1, buildNotif("러닝 시작!", "0.00km"), type)
+        startRun()
+        return START_STICKY
+    }
+
+    private fun startRun() {
+        startTs = System.currentTimeMillis()
+        lastCueMs = 0L; kmSplitSec = 0.0; lastLoc = null; window.clear()
+        goalAnnounced = false; lastIntervalPhase = ""; LiveCoach.intervalLabel = ""
+        LiveCoach.phase = "running"
+        LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
+        LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
+        speak("자, 출발! 목표 페이스 ${mmss(LiveCoach.targetPace)} 맞춰서 가보자!")
+
+        if (LiveCoach.mode == "gps") startGps()
+
+        scope = CoroutineScope(Dispatchers.Main)
+        scope!!.launch { while (isActive) { delay(1000); tick() } }
+    }
+
+    private fun startGps() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            LiveCoach.cue = "⚠️ 위치 권한이 필요해요"
+            return
+        }
+        lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        listener = LocationListener { loc ->
+            val last = lastLoc
+            if (last != null) { val d = haversine(last, loc); if (d < 50) LiveCoach.distM += d }
+            lastLoc = loc
+        }
+        try { lm?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener!!) }
+        catch (e: SecurityException) { LiveCoach.cue = "⚠️ 위치 권한 오류" }
+    }
+
+    private fun tick() {
+        val now = System.currentTimeMillis()
+        if (LiveCoach.mode == "sim") LiveCoach.distM += 1000.0 / LiveCoach.simPace
+        LiveCoach.elapsedSec = (now - startTs) / 1000
+        window.addLast(now to LiveCoach.distM)
+        while (window.isNotEmpty() && now - window.first().first > 6000) window.removeFirst()
+        LiveCoach.curPace = if (window.size >= 2) {
+            val a = window.first(); val b = window.last()
+            val dd = (b.second - a.second) / 1000.0; val dt = (b.first - a.first) / 1000.0
+            if (dd > 0) (dt / dd).roundToInt() else 0
+        } else 0
+        LiveCoach.avgPace = if (LiveCoach.distM > 0) (LiveCoach.elapsedSec / (LiveCoach.distM / 1000.0)).roundToInt() else 0
+
+        val km = (LiveCoach.distM / 1000).toInt()
+        if (km > LiveCoach.kmDone) {
+            LiveCoach.kmDone = km
+            val split = (LiveCoach.elapsedSec - kmSplitSec).toInt()
+            kmSplitSec = LiveCoach.elapsedSec.toDouble()
+            val base = "${km}킬로미터 통과! 스플릿 ${mmss(split)}"
+            LiveCoach.cue = "✅ $base"; speak(base)
+            if (LiveCoach.aiOn) aiCheer(km)
+        }
+        handleGoal(now)
+        updateNotif()
+    }
+
+    private fun handleGoal(now: Long) {
+        when (LiveCoach.goalType) {
+            "hr" -> handleHrZone(now)
+            "interval" -> handleInterval()
+            "distance" -> {
+                if (!goalAnnounced && LiveCoach.distM >= LiveCoach.goalDistanceKm * 1000) {
+                    goalAnnounced = true
+                    val m = "목표 ${"%.1f".format(LiveCoach.goalDistanceKm)}킬로미터 완주! 정말 잘했어 🎉"
+                    LiveCoach.cue = "🎯 $m"; speak(m)
+                } else paceTick(now)
+            }
+            "time" -> {
+                if (!goalAnnounced && LiveCoach.elapsedSec >= LiveCoach.goalTimeMin * 60L) {
+                    goalAnnounced = true
+                    val m = "목표 ${LiveCoach.goalTimeMin}분 달성! 끝까지 잘 버텼어 🎉"
+                    LiveCoach.cue = "🎯 $m"; speak(m)
+                } else paceTick(now)
+            }
+            "free" -> {
+                if (now - lastCueMs > 30000 && LiveCoach.curPace > 0) {
+                    lastCueMs = now
+                    val m = "좋아, 이 리듬 그대로 가자 👍"; LiveCoach.cue = "🗣️ $m"; speak(m)
+                }
+            }
+            else -> paceTick(now) // pace
+        }
+    }
+
+    private fun handleHrZone(now: Long) {
+        val hr = BleHeart.bpm
+        if (hr == null) {
+            if (now - lastCueMs > 20000) { lastCueMs = now; LiveCoach.cue = "⌚ 심박 센서 연결을 기다리는 중..." }
+            return
+        }
+        if (now - lastCueMs > 15000) {
+            lastCueMs = now
+            val t = LiveCoach.targetHr
+            val msg = when {
+                hr > t -> "심박 ${hr}, 목표 ${t} 넘었어. 속도 줄이고 호흡 골라"
+                hr < t - 10 -> "심박 ${hr}, 여유 있어. 살짝 올려도 돼"
+                else -> "심박 ${hr}, 목표존 잘 지키고 있어"
+            }
+            LiveCoach.cue = "❤️ $msg"; speak(msg)
+        }
+    }
+
+    private fun paceTick(now: Long) {
+        if (LiveCoach.curPace > 0 && now - lastCueMs > 15000) {
+            lastCueMs = now
+            val delta = LiveCoach.curPace - LiveCoach.targetPace
+            val msg = when {
+                delta > 15 -> "페이스가 느려지고 있어! 조금만 더 힘내자 💪"
+                delta < -15 -> "너무 빠른데? 페이스 유지하면서 힘 아끼자"
+                else -> "좋아! 목표 페이스 딱 맞아, 이대로 가자 👍"
+            }
+            LiveCoach.cue = "🗣️ $msg"; speak(msg)
+        }
+    }
+
+    private fun handleInterval() {
+        val work = LiveCoach.intervalWorkSec
+        val rest = LiveCoach.intervalRestSec
+        val sets = LiveCoach.intervalSets
+        val cycle = work + rest
+        if (cycle <= 0) return
+        val total = LiveCoach.elapsedSec
+        val done = (total / cycle).toInt()
+        if (done >= sets) {
+            if (lastIntervalPhase != "done") {
+                lastIntervalPhase = "done"
+                LiveCoach.intervalLabel = "완료"
+                val m = "인터벌 ${sets}세트 완료! 수고했어 🔥"; LiveCoach.cue = "🎯 $m"; speak(m)
+            }
+            return
+        }
+        val inCycle = total % cycle
+        val setNo = done + 1
+        val phase = if (inCycle < work) "work" else "rest"
+        val key = "$phase$setNo"
+        if (key != lastIntervalPhase) {
+            lastIntervalPhase = key
+            if (phase == "work") {
+                LiveCoach.intervalLabel = "빠르게 $setNo/$sets"
+                val m = "$setNo 세트! 빠르게 달려 🔥"; LiveCoach.cue = "🏃 $m"; speak(m)
+            } else {
+                LiveCoach.intervalLabel = "회복 $setNo/$sets"
+                val m = "회복! 천천히 숨 골라 😮‍💨"; LiveCoach.cue = "🧘 $m"; speak(m)
+            }
+        }
+    }
+
+    private fun aiCheer(km: Int) {
+        val store = CoachStore(this)
+        val key = store.keyFor(store.provider)
+        if (key.isBlank()) return
+        scope?.launch {
+            val prompt = "러닝 코치로서 딱 한 문장, 20자 내외로 짧고 힘차게 응원해줘. 지금 ${km}km 지났어. 한국어로."
+            AiCoach.generate(store.provider, key, prompt).onSuccess {
+                val line = it.replace("\n", " ").take(60)
+                LiveCoach.cue = "🤖 $line"; speak(line)
+            }
+        }
+    }
+
+    private fun finishRun() {
+        listener?.let { lm?.removeUpdates(it) }; listener = null
+        scope?.cancel(); scope = null
+        val km = LiveCoach.distM / 1000
+        LiveCoach.avgPace = if (km > 0) (LiveCoach.elapsedSec / km).roundToInt() else 0
+        speak("수고했어! ${"%.1f".format(km)}킬로미터 완주!")
+        LiveCoach.phase = "finished"
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        listener?.let { lm?.removeUpdates(it) }
+        scope?.cancel()
+        tts?.stop(); tts?.shutdown()
+    }
+
+    private fun speak(s: String) {
+        if (!LiveCoach.voice) return
+        // 음성은 이모지·기호 제거 (TTS가 "체크 표시" 같이 읽는 것 방지)
+        val clean = s.replace(Regex("[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9 .,!?~:/%-]"), " ")
+            .replace(Regex("\\s+"), " ").trim()
+        if (clean.isNotEmpty()) tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "c")
+    }
+
+    private fun buildNotif(title: String, text: String): Notification {
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return NotificationCompat.Builder(this, "live_coach")
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentTitle(title).setContentText(text)
+            .setOngoing(true).setContentIntent(pi).build()
+    }
+
+    private fun updateNotif() {
+        val hrTxt = BleHeart.bpm?.let { " · ❤️$it" } ?: ""
+        val n = buildNotif(
+            "🏃 러닝 중 ${"%.2f".format(LiveCoach.distM / 1000)}km",
+            "현재 ${mmss(LiveCoach.curPace)} · 평균 ${mmss(LiveCoach.avgPace)} · ${fmtDur(LiveCoach.elapsedSec)}$hrTxt"
+        )
+        getSystemService(NotificationManager::class.java).notify(1, n)
+    }
+
+    private fun mmss(sec: Int) = if (sec <= 0) "-" else "%d:%02d".format(sec / 60, sec % 60)
+    private fun fmtDur(sec: Long) = "%d:%02d".format(sec / 60, sec % 60)
+    private fun haversine(a: Location, b: Location): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(b.latitude - a.latitude)
+        val dLon = Math.toRadians(b.longitude - a.longitude)
+        val s = sin(dLat / 2).pow(2) + cos(Math.toRadians(a.latitude)) * cos(Math.toRadians(b.latitude)) * sin(dLon / 2).pow(2)
+        return 2 * R * asin(sqrt(s))
+    }
+
+    companion object {
+        fun start(ctx: Context) =
+            ContextCompat.startForegroundService(ctx, Intent(ctx, LiveCoachService::class.java))
+        fun stop(ctx: Context) =
+            ctx.startService(Intent(ctx, LiveCoachService::class.java).setAction("STOP"))
+    }
+}

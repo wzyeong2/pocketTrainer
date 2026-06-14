@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>운동 코치</title>
+<style>
+  :root { --bg:#0f1216; --card:#1a1f27; --card2:#222934; --accent:#2e7d6b; --accent2:#3da58a; --text:#e8edf2; --muted:#9aa6b2; --line:#2a313b; --ok:#3da58a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:560px; margin:0 auto; padding:16px 14px 80px; }
+  .top { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  h1 { font-size:1.4rem; margin:0; }
+  .gear { background:var(--card); border:1px solid var(--line); color:var(--text); border-radius:10px; padding:8px 12px; cursor:pointer; font-size:.85rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:14px; }
+  h2 { font-size:.95rem; margin:0 0 10px; }
+  label { display:block; font-size:.8rem; color:var(--muted); margin:8px 0 4px; }
+  input, textarea, select { width:100%; background:#0d1117; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:10px 12px; font-size:.95rem; font-family:inherit; }
+  textarea { resize:vertical; min-height:54px; }
+  /* 필터 칩 */
+  .filters { display:flex; gap:7px; overflow-x:auto; padding-bottom:4px; margin-bottom:12px; }
+  .filters::-webkit-scrollbar { height:0; }
+  .chip { white-space:nowrap; padding:8px 14px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; font-size:.88rem; }
+  .chip.active { background:var(--accent); border-color:var(--accent2); font-weight:600; }
+  /* 캘린더 */
+  .calhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .calhead button { background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; width:34px; height:34px; cursor:pointer; font-size:1rem; }
+  .calhead .mtitle { font-weight:700; font-size:1rem; }
+  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .dow { text-align:center; font-size:.72rem; color:var(--muted); padding:4px 0; }
+  .day { aspect-ratio:1; border-radius:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:.82rem; cursor:default; position:relative; border:1px solid transparent; }
+  .day.has { background:var(--card2); cursor:pointer; }
+  .day.has:hover { border-color:var(--accent2); }
+  .day.today { outline:2px solid var(--accent2); }
+  .day.sel { background:var(--accent); font-weight:700; }
+  .day .dots { display:flex; gap:2px; margin-top:3px; height:6px; }
+  .dot { width:5px; height:5px; border-radius:50%; }
+  .empty { color:#3a4250; }
+  /* 리스트 */
+  .listhead { display:flex; align-items:center; justify-content:space-between; margin:4px 0 8px; }
+  .listhead .clear { font-size:.8rem; color:var(--accent2); cursor:pointer; background:none; border:none; }
+  .item { display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin-bottom:10px; cursor:pointer; transition:.12s; }
+  .item:hover { border-color:var(--accent2); }
+  .item .emo { font-size:1.6rem; }
+  .item .info { flex:1; }
+  .item .t { font-weight:600; }
+  .item .d { font-size:.8rem; color:var(--muted); }
+  .item .stat { text-align:right; font-size:.9rem; }
+  .item .stat .big { font-weight:700; }
+  .item .coached { font-size:.7rem; color:var(--ok); }
+  .empty-msg { color:var(--muted); text-align:center; padding:24px; font-size:.9rem; }
+  /* 모달 */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:flex-end; justify-content:center; z-index:50; }
+  .overlay.show { display:flex; }
+  .sheet { background:var(--bg); width:100%; max-width:560px; max-height:92vh; overflow-y:auto; border-radius:20px 20px 0 0; border:1px solid var(--line); padding:18px 16px 30px; }
+  .sheet .grab { width:40px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px; }
+  .sheet h3 { margin:0 0 4px; font-size:1.2rem; }
+  .sheet .sd { color:var(--muted); font-size:.85rem; margin-bottom:14px; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+  .stat-box { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .stat-box .k { font-size:.74rem; color:var(--muted); }
+  .stat-box .v { font-size:1.05rem; font-weight:700; }
+  .splits { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; font-size:.86rem; }
+  .splits .srow { display:flex; justify-content:space-between; padding:2px 0; }
+  .btn { width:100%; padding:14px; border:none; border-radius:12px; background:var(--accent2); color:#fff; font-size:1rem; font-weight:700; cursor:pointer; }
+  .btn:disabled { opacity:.5; }
+  .btn-sm { background:transparent; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:8px 12px; font-size:.85rem; cursor:pointer; }
+  .out { font-size:.96rem; line-height:1.65; margin-top:14px; }
+  .out h3 { color:var(--accent2); font-size:1.02rem; margin:16px 0 6px; }
+  .out strong { color:#fff; }
+  .thumb { max-width:150px; border-radius:10px; margin-top:8px; display:block; }
+  .status { font-size:.82rem; margin-top:8px; }
+  .status.ok { color:var(--ok); } .status.bad { color:#ff9a9a; }
+  .err { background:#3a1d1d; border:1px solid #5a2a2a; color:#ffb4b4; padding:10px; border-radius:10px; margin-top:10px; font-size:.88rem; }
+  .spinner { display:inline-block; width:15px; height:15px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:8px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  a { color:var(--accent2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🏃 운동 코치</h1>
+    <div style="display:flex;gap:8px">
+      <button class="gear" style="background:#3a1d1d;border-color:#5a2a2a;color:#ff9a9a" onclick="openLive()">🔴 라이브</button>
+      <button class="gear" onclick="toggleSettings()">⚙️ AI 설정</button>
+    </div>
+  </div>
+
+  <!-- AI 설정 (접힘) -->
+  <div class="card" id="settings" style="display:none">
+    <h2>🤖 AI 엔진</h2>
+    <div style="display:flex;gap:8px">
+      <button class="chip" id="provGemini" onclick="setProvider('gemini')">Gemini (무료)</button>
+      <button class="chip" id="provClaude" onclick="setProvider('claude')">Claude (유료)</button>
+    </div>
+    <label>API 키</label>
+    <input id="apiKey" type="password" placeholder="키 붙여넣기 (이 브라우저에만 저장)" oninput="saveKey()" />
+    <div class="status" id="keyHint" style="color:var(--muted)"></div>
+    <button class="btn-sm" style="margin-top:8px" onclick="testKey()">🔌 키 연결 테스트</button>
+    <div class="status" id="keyStatus"></div>
+  </div>
+
+  <!-- 운동별 필터 -->
+  <div class="filters" id="filters"></div>
+
+  <!-- 캘린더 -->
+  <div class="card">
+    <div class="calhead">
+      <button onclick="moveMonth(-1)">‹</button>
+      <div class="mtitle" id="mtitle"></div>
+      <button onclick="moveMonth(1)">›</button>
+    </div>
+    <div class="cal" id="caldow"></div>
+    <div class="cal" id="cal"></div>
+  </div>
+
+  <!-- 운동 리스트 -->
+  <div class="listhead">
+    <h2 id="listTitle">최근 운동</h2>
+    <button class="clear" id="clearDate" style="display:none" onclick="selectDate(null)">전체 보기 ✕</button>
+  </div>
+  <div id="list"></div>
+</div>
+
+<!-- 상세/코칭 모달 -->
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeDetail()">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<!-- 라이브 러닝 코치 -->
+<div class="overlay" id="liveOverlay">
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3>🔴 라이브 러닝 코치</h3>
+
+    <!-- 설정 -->
+    <div id="liveSetup">
+      <div class="sd">목표 페이스에 맞춰 실시간 음성 코칭을 받아요.</div>
+      <label>목표 페이스 (분:초 /km)</label>
+      <input id="liveTarget" value="5:30" />
+      <label>모드</label>
+      <div style="display:flex;gap:8px">
+        <button class="chip active" id="modeSim" onclick="setLiveMode('sim')">🎮 시뮬레이션</button>
+        <button class="chip" id="modeGps" onclick="setLiveMode('gps')">📍 실제 GPS</button>
+      </div>
+      <div class="sd" id="modeHint" style="margin-top:6px">시뮬레이션: 실제로 안 뛰고 버튼으로 페이스를 조절하며 음성 코칭을 테스트해요.</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <input type="checkbox" id="liveVoice" checked style="width:auto"> 🔊 음성 코칭
+      </label>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="liveAI" style="width:auto"> 🤖 km마다 AI 응원 (무료 토큰 소량 사용)
+      </label>
+      <div style="height:14px"></div>
+      <button class="btn" onclick="startLive()">▶️ 시작</button>
+      <button class="btn-sm" style="width:100%;margin-top:8px" onclick="closeLive()">닫기</button>
+    </div>
+
+    <!-- 달리는 중 -->
+    <div id="liveRun" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0">
+        <div class="stat-box"><div class="k">⏱️ 시간</div><div class="v" id="lvTime" style="font-size:1.6rem">0:00</div></div>
+        <div class="stat-box"><div class="k">📏 거리</div><div class="v" id="lvDist" style="font-size:1.6rem">0.00 km</div></div>
+        <div class="stat-box"><div class="k">🏃 현재 페이스</div><div class="v" id="lvCur" style="font-size:1.6rem">-</div></div>
+        <div class="stat-box"><div class="k">📊 평균 페이스</div><div class="v" id="lvAvg" style="font-size:1.6rem">-</div></div>
+      </div>
+      <div class="stat-box" style="text-align:center;margin-bottom:10px">
+        <div class="k">목표 대비</div><div class="v" id="lvDelta" style="font-size:1.3rem">-</div>
+      </div>
+      <div id="lvCueBox" class="splits" style="text-align:center;font-size:1rem;min-height:2.4em">코칭 준비 중...</div>
+      <div id="simControls" style="display:flex;gap:8px;margin:10px 0">
+        <button class="btn-sm" style="flex:1" onclick="simAdjust(-10)">⬆️ 빠르게</button>
+        <button class="btn-sm" style="flex:1" onclick="simAdjust(10)">⬇️ 느리게</button>
+      </div>
+      <button class="btn" style="background:#a83a3a" onclick="stopLive()">⏹️ 종료</button>
+    </div>
+
+    <!-- 요약 -->
+    <div id="liveSummary" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+// ================= 설정 =================
+const GEMINI_MODELS = ['gemini-2.5-flash','gemini-2.5-flash-lite'];
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const TYPE_META = {
+  running:{label:'달리기',emo:'🏃',color:'#3da58a',distance:true},
+  strength:{label:'헬스·근력',emo:'🏋️',color:'#e0a23b',distance:false},
+  walking:{label:'걷기',emo:'🚶',color:'#5b8def',distance:true},
+  cycling:{label:'자전거',emo:'🚴',color:'#c065d6',distance:true},
+  hiking:{label:'등산',emo:'🥾',color:'#d9705a',distance:true},
+};
+let provider = localStorage.getItem('provider') || 'gemini';
+
+// ================= 임시 데이터 (삼성헬스 연동된 척) =================
+const today = new Date(); today.setHours(12,0,0,0);
+function dAgo(n){ const d=new Date(today); d.setDate(d.getDate()-n); return d; }
+function ymd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function mdLabel(d){ return `${d.getMonth()+1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]})`; }
+
+const TEMPLATES = [
+  {ago:1, type:'running', km:10.0, min:53.73, ah:165, mh:182, kcal:720, splits:[335,328,322,320,318,322,325,320,315,310]},
+  {ago:2, type:'strength', min:60, ah:120, mh:150, kcal:350, memo:'가슴+삼두: 벤치프레스 50kg 5x5, 인클라인 덤벨 20kg 4x10, 딥스 3x12'},
+  {ago:3, type:'walking', km:4.2, min:48, ah:102, mh:120, kcal:210},
+  {ago:4, type:'running', km:5.0, min:24.5, ah:170, mh:185, kcal:360, splits:[300,295,292,290,288]},
+  {ago:6, type:'cycling', km:22, min:52, ah:138, mh:162, kcal:510},
+  {ago:7, type:'running', km:8.0, min:44, ah:162, mh:180, kcal:580, splits:[340,335,330,328,330,332,328,325]},
+  {ago:9, type:'strength', min:65, ah:122, mh:152, kcal:380, memo:'하체: 스쿼트 70kg 5x5, 레그프레스 120kg 4x12, 런지 3x12'},
+  {ago:12, type:'running', km:10.0, min:56, ah:160, mh:178, kcal:730, splits:[350,345,340,338,336,340,342,338,335,330]},
+  {ago:14, type:'walking', km:5.0, min:55, ah:100, mh:118, kcal:250},
+  {ago:16, type:'hiking', km:7.0, min:160, ah:132, mh:168, kcal:950, elev:620},
+  {ago:18, type:'strength', min:55, ah:118, mh:145, kcal:320, memo:'등+이두: 데드리프트 80kg 5x3, 랫풀다운 50kg 4x10, 바벨로우 40kg 4x10'},
+  {ago:20, type:'running', km:5.0, min:26, ah:168, mh:183, kcal:370, splits:[315,312,310,308,315]},
+  {ago:22, type:'cycling', km:30, min:70, ah:140, mh:165, kcal:700},
+  {ago:35, type:'running', km:10.0, min:60, ah:158, mh:175, kcal:740, splits:[365,360,358,355,360,362,358,355,352,350]},
+];
+const WORKOUTS = TEMPLATES.map((t,i) => {
+  const d = dAgo(t.ago);
+  return { id:i, dateObj:d, date:ymd(d), ...t };
+});
+const byDate = {};
+WORKOUTS.forEach(w => { (byDate[w.date] ||= []).push(w); });
+
+// ================= 상태 =================
+let typeFilter = 'all';
+let selectedDate = null;
+let calY = today.getFullYear(), calM = today.getMonth();
+
+// ================= 초기화 =================
+function init(){
+  // 필터
+  const f = document.getElementById('filters');
+  const opts = [['all','전체','📋'], ...Object.entries(TYPE_META).map(([k,v])=>[k,v.label,v.emo])];
+  opts.forEach(([id,label,emo])=>{
+    const el=document.createElement('div');
+    el.className='chip'+(id==='all'?' active':''); el.dataset.id=id;
+    el.textContent=`${emo} ${label}`;
+    el.onclick=()=>setFilter(id);
+    f.appendChild(el);
+  });
+  // 요일 헤더
+  document.getElementById('caldow').innerHTML = ['일','월','화','수','목','금','토'].map(d=>`<div class="dow">${d}</div>`).join('');
+  setProvider(provider);
+  renderCalendar(); renderList();
+}
+
+function setFilter(id){
+  typeFilter=id;
+  document.querySelectorAll('#filters .chip').forEach(c=>c.classList.toggle('active',c.dataset.id===id));
+  renderCalendar(); renderList();
+}
+function moveMonth(delta){
+  calM+=delta; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;}
+  renderCalendar();
+}
+function selectDate(d){
+  selectedDate=d;
+  document.getElementById('clearDate').style.display = d?'inline':'none';
+  renderCalendar(); renderList();
+}
+
+function workoutsFor(dateStr){
+  let ws = byDate[dateStr]||[];
+  if(typeFilter!=='all') ws=ws.filter(w=>w.type===typeFilter);
+  return ws;
+}
+
+// ================= 캘린더 =================
+function renderCalendar(){
+  document.getElementById('mtitle').textContent=`${calY}년 ${calM+1}월`;
+  const first=new Date(calY,calM,1), startDow=first.getDay();
+  const days=new Date(calY,calM+1,0).getDate();
+  const cells=[];
+  for(let i=0;i<startDow;i++) cells.push('<div class="day empty"></div>');
+  for(let day=1;day<=days;day++){
+    const dStr=ymd(new Date(calY,calM,day));
+    const ws=workoutsFor(dStr);
+    const isToday=dStr===ymd(today), isSel=dStr===selectedDate;
+    const dots=ws.slice(0,3).map(w=>`<span class="dot" style="background:${TYPE_META[w.type].color}"></span>`).join('');
+    const cls='day'+(ws.length?' has':'')+(isToday?' today':'')+(isSel?' sel':'');
+    cells.push(`<div class="${cls}" ${ws.length?`onclick="selectDate('${dStr}')"`:''}><span>${day}</span><span class="dots">${dots}</span></div>`);
+  }
+  document.getElementById('cal').innerHTML=cells.join('');
+}
+
+// ================= 리스트 =================
+function renderList(){
+  const title=document.getElementById('listTitle');
+  let ws;
+  if(selectedDate){ ws=workoutsFor(selectedDate); title.textContent=mdLabel(new Date(selectedDate+'T12:00')); }
+  else { ws=WORKOUTS.filter(w=>typeFilter==='all'||w.type===typeFilter).sort((a,b)=>b.dateObj-a.dateObj); title.textContent='최근 운동'; }
+  const list=document.getElementById('list');
+  if(!ws.length){ list.innerHTML='<div class="empty-msg">해당 조건의 운동 기록이 없어요.</div>'; return; }
+  list.innerHTML=ws.map(w=>{
+    const m=TYPE_META[w.type];
+    const coached=localStorage.getItem('coach_'+w.id)?'<div class="coached">✓ 코칭 받음</div>':'';
+    const stat=m.distance? `<div class="big">${w.km}km</div><div class="d">${fmtPace(w)}</div>`
+                          : `<div class="big">${w.min}분</div><div class="d">근력</div>`;
+    return `<div class="item" onclick="openDetail(${w.id})">
+      <div class="emo">${m.emo}</div>
+      <div class="info"><div class="t">${m.label}</div><div class="d">${mdLabel(w.dateObj)}</div>${coached}</div>
+      <div class="stat">${stat}</div></div>`;
+  }).join('');
+}
+
+function fmtPace(w){
+  if(!w.km||!w.min) return '';
+  const s=Math.round(w.min*60/w.km);
+  return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}/km`;
+}
+function fmtDur(min){
+  const total=Math.round(min*60), h=Math.floor(total/3600), m=Math.floor((total%3600)/60), s=total%60;
+  return h>0?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;
+}
+function fmtSec(sec){ return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`; }
+
+// ================= 상세 모달 =================
+let modal = { id:null, img:null, mime:null };
+function openDetail(id){
+  const w=WORKOUTS.find(x=>x.id===id); const m=TYPE_META[w.type];
+  modal={ id, img:null, mime:null };
+  const stats=[];
+  if(m.distance) stats.push(['거리',`${w.km} km`]);
+  stats.push(['시간',fmtDur(w.min)]);
+  if(m.distance) stats.push(['평균 페이스',fmtPace(w)]);
+  if(w.ah) stats.push(['평균 심박',`${w.ah} bpm`]);
+  if(w.mh) stats.push(['최고 심박',`${w.mh} bpm`]);
+  if(w.kcal) stats.push(['칼로리',`${w.kcal} kcal`]);
+  if(w.elev) stats.push(['고도 상승',`${w.elev} m`]);
+
+  let splitsHtml='';
+  if(w.splits){
+    splitsHtml='<div class="splits"><div style="color:var(--muted);font-size:.78rem;margin-bottom:4px">구간별 페이스</div>'+
+      w.splits.map((s,i)=>`<div class="srow"><span>${i+1}km</span><span>${fmtSec(s)}/km</span></div>`).join('')+'</div>';
+  }
+  const savedMemo=localStorage.getItem('memo_'+id)||w.memo||'';
+  const savedCoach=localStorage.getItem('coach_'+id);
+
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h3>${m.emo} ${m.label}</h3>
+    <div class="sd">${mdLabel(w.dateObj)}</div>
+    <div class="stats">${stats.map(([k,v])=>`<div class="stat-box"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>
+    ${splitsHtml}
+    <label>메모 (종목·중량·컨디션 등)</label>
+    <textarea id="mMemo">${savedMemo}</textarea>
+    <label>📷 사진 첨부 (선택 — 기구·자세·식단)</label>
+    <input type="file" accept="image/*" capture="environment" onchange="onModalPhoto(event)" />
+    <img id="mThumb" class="thumb" style="display:none" />
+    <div style="height:14px"></div>
+    <button class="btn" id="mCoachBtn" onclick="coachWorkout(${id})">${savedCoach?'🔄 다시 코칭 받기':'💪 코칭 받기'}</button>
+    <div id="mError"></div>
+    <div class="out" id="mOut">${savedCoach?renderMd(JSON.parse(savedCoach).text):''}</div>
+  `;
+  document.getElementById('overlay').classList.add('show');
+}
+function closeDetail(){ document.getElementById('overlay').classList.remove('show'); }
+function onModalPhoto(e){
+  const file=e.target.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{ const u=r.result; modal.mime=u.substring(5,u.indexOf(';')); modal.img=u.substring(u.indexOf(',')+1);
+    const t=document.getElementById('mThumb'); t.src=u; t.style.display='block'; };
+  r.readAsDataURL(file);
+}
+
+// ================= 코칭 =================
+async function coachWorkout(id){
+  const key=document.getElementById('apiKey').value.trim();
+  const errEl=document.getElementById('mError'); errEl.innerHTML='';
+  if(!key){ errEl.innerHTML='<div class="err">먼저 ⚙️ AI 설정에서 키를 입력해줘!</div>'; toggleSettings(true); return; }
+  const w=WORKOUTS.find(x=>x.id===id);
+  const memo=document.getElementById('mMemo').value;
+  localStorage.setItem('memo_'+id,memo);
+  const btn=document.getElementById('mCoachBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>코치가 분석 중...';
+  try{
+    const prompt=buildPrompt(w,memo);
+    const text=provider==='gemini'?await callGemini(key,prompt):await callClaude(key,prompt);
+    localStorage.setItem('coach_'+id,JSON.stringify({text,ts:Date.now()}));
+    document.getElementById('mOut').innerHTML=renderMd(text);
+    renderList();
+  }catch(e){ errEl.innerHTML=`<div class="err">코칭 실패: ${e.message}</div>`; }
+  finally{ btn.disabled=false; btn.innerHTML='🔄 다시 코칭 받기'; }
+}
+
+function buildPrompt(w,memo){
+  const m=TYPE_META[w.type];
+  let s=`너는 사용자의 친한 운동 코치 친구야. 반말로 친근하고 격려하는 말투로 코칭해줘. 이모지도 적당히.\n\n`;
+  s+=`[운동 종류] ${m.emo} ${m.label}\n[날짜] ${mdLabel(w.dateObj)}\n\n[기록]\n`;
+  if(m.distance&&w.km) s+=`• 거리: ${w.km}km\n`;
+  s+=`• 시간: ${fmtDur(w.min)}\n`;
+  if(m.distance&&w.km) s+=`• 평균 페이스: ${fmtPace(w)}\n`;
+  if(w.ah) s+=`• 평균/최고 심박: ${w.ah}/${w.mh} bpm\n`;
+  if(w.kcal) s+=`• 칼로리: ${w.kcal}kcal\n`;
+  if(w.elev) s+=`• 고도 상승: ${w.elev}m\n`;
+  if(w.splits) s+=`• 구간별 페이스: ${w.splits.map((x,i)=>`${i+1}km ${fmtSec(x)}`).join(', ')}\n`;
+  if(memo&&memo.trim()) s+=`• 메모: ${memo}\n`;
+  if(w.type==='running') s+=`\n[목표] 10km 50분 이내(5:00/km) 완주 (현재 약 5:22/km)\n`;
+  if(modal.img) s+=`\n첨부 사진도 함께 분석해줘 (기구/자세/장소/식단 등).\n`;
+  s+=`\n아래 형식으로 (제목 유지):\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n`;
+  if(w.type==='running') s+=`(인터벌/템포런/롱런 중 선택 + 구체적으로)\n### 3. 구간별 목표 페이스\n### 4. 심박수 목표\n`;
+  else if(w.type==='strength') s+=`(다음 분할/종목·중량·세트·휴식)\n### 3. 자세·폼 팁\n### 4. 강도 가이드\n`;
+  else s+=`(다음 목표 거리·시간·강도)\n### 3. 페이스·심박 가이드\n`;
+  s+=`### 5. 준비운동\n### 6. 보조 운동\n\n핵심만, 너무 길지 않게.`;
+  return s;
+}
+
+// ================= AI =================
+async function callGemini(key,prompt){
+  const parts=[{text:prompt}];
+  if(modal.img) parts.push({inline_data:{mime_type:modal.mime,data:modal.img}});
+  let lastErr;
+  for(const model of GEMINI_MODELS){
+    try{
+      const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts}]})});
+      const j=await res.json();
+      if(res.ok) return j.candidates[0].content.parts.map(p=>p.text||'').join('');
+      lastErr=new Error(j.error?.message||('HTTP '+res.status));
+      if(res.status!==429) throw lastErr;
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr;
+}
+async function callClaude(key,prompt){
+  const content=[{type:'text',text:prompt}];
+  if(modal.img) content.unshift({type:'image',source:{type:'base64',media_type:modal.mime,data:modal.img}});
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:CLAUDE_MODEL,max_tokens:1500,messages:[{role:'user',content}]})});
+  const j=await res.json();
+  if(!res.ok) throw new Error(j.error?.message||('HTTP '+res.status));
+  return j.content.map(c=>c.text||'').join('');
+}
+
+// ================= 설정 UI =================
+function toggleSettings(force){
+  const s=document.getElementById('settings');
+  s.style.display=(force===true||s.style.display==='none')?'block':'none';
+}
+function setProvider(p){
+  provider=p; localStorage.setItem('provider',p);
+  document.getElementById('provGemini').classList.toggle('active',p==='gemini');
+  document.getElementById('provClaude').classList.toggle('active',p==='claude');
+  document.getElementById('apiKey').value=localStorage.getItem('key_'+p)||'';
+  document.getElementById('keyHint').innerHTML=p==='gemini'
+    ?'🆓 무료 키: <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>'
+    :'💳 키: <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>';
+}
+function saveKey(){ localStorage.setItem('key_'+provider,document.getElementById('apiKey').value); }
+async function testKey(){
+  const key=document.getElementById('apiKey').value.trim(); const el=document.getElementById('keyStatus');
+  if(!key){ el.className='status bad'; el.textContent='먼저 키를 입력해줘!'; return; }
+  el.className='status'; el.innerHTML='<span class="spinner"></span>확인 중...';
+  try{ if(provider==='gemini') await callGeminiNoImg(key); else await callClaude(key,'안녕');
+    el.className='status ok'; el.textContent='✅ 연결 성공! 준비 끝났어요 🎉';
+  }catch(e){ el.className='status bad'; el.textContent='❌ 실패: '+e.message; }
+}
+async function callGeminiNoImg(key){
+  const saved=modal.img; modal.img=null;
+  try{ return await callGemini(key,'안녕'); } finally{ modal.img=saved; }
+}
+
+// ================= 유틸 =================
+function renderMd(t){
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^#{2,3} (.*)$/gm,'<h3>$1</h3>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/^\s*[\*\-] (.*)$/gm,'&nbsp;&nbsp;• $1')
+    .replace(/\n/g,'<br>');
+}
+
+// ================= 라이브 러닝 코치 =================
+let live = { running:false, mode:'sim', target:330, simPace:360, dist:0, startTs:0,
+  kmDone:0, lastCueTs:0, window:[], timer:null, watchId:null, lastPos:null, voice:true, ai:false };
+
+function parsePace(str){ const m=String(str).split(':'); return (parseInt(m[0])||0)*60+(parseInt(m[1])||0); }
+function speak(text){
+  if(!live.voice || !window.speechSynthesis) return;
+  const u=new SpeechSynthesisUtterance(text); u.lang='ko-KR'; u.rate=1.05;
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+function openLive(){
+  document.getElementById('liveSetup').style.display='block';
+  document.getElementById('liveRun').style.display='none';
+  document.getElementById('liveSummary').style.display='none';
+  document.getElementById('liveOverlay').classList.add('show');
+}
+function closeLive(){ stopTimers(); document.getElementById('liveOverlay').classList.remove('show'); }
+function setLiveMode(m){
+  live.mode=m;
+  document.getElementById('modeSim').classList.toggle('active',m==='sim');
+  document.getElementById('modeGps').classList.toggle('active',m==='gps');
+  document.getElementById('modeHint').textContent = m==='sim'
+    ? '시뮬레이션: 실제로 안 뛰고 버튼으로 페이스를 조절하며 음성 코칭을 테스트해요.'
+    : '실제 GPS: 폰에서 위치 추적으로 진짜 페이스를 측정해요. (위치 권한 허용 필요)';
+}
+
+function startLive(){
+  live.target=parsePace(document.getElementById('liveTarget').value);
+  live.voice=document.getElementById('liveVoice').checked;
+  live.ai=document.getElementById('liveAI').checked;
+  live.running=true; live.dist=0; live.startTs=Date.now(); live.kmDone=0;
+  live.lastCueTs=0; live.window=[]; live.simPace=live.target+30; live.lastPos=null;
+  document.getElementById('liveSetup').style.display='none';
+  document.getElementById('liveRun').style.display='block';
+  document.getElementById('simControls').style.display = live.mode==='sim'?'flex':'none';
+  speak('자, 출발! 목표 페이스 '+fmtSec(live.target)+' 맞춰서 가보자!');
+
+  if(live.mode==='gps'){
+    if(!navigator.geolocation){ alert('이 브라우저는 위치를 지원하지 않아요.'); return; }
+    live.watchId=navigator.geolocation.watchPosition(onGps, e=>{
+      document.getElementById('lvCueBox').textContent='⚠️ GPS 오류: '+e.message+' (시뮬레이션으로 해보세요)';
+    }, { enableHighAccuracy:true, maximumAge:1000, timeout:10000 });
+  }
+  live.timer=setInterval(liveTick,1000);
+}
+function stopTimers(){
+  if(live.timer){ clearInterval(live.timer); live.timer=null; }
+  if(live.watchId!=null){ navigator.geolocation.clearWatch(live.watchId); live.watchId=null; }
+  if(window.speechSynthesis) speechSynthesis.cancel();
+}
+function simAdjust(delta){ live.simPace=Math.max(180,Math.min(720,live.simPace+delta)); }
+
+function haversine(a,b){
+  const R=6371000, toR=x=>x*Math.PI/180;
+  const dLat=toR(b.lat-a.lat), dLon=toR(b.lon-a.lon);
+  const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function onGps(pos){
+  const p={lat:pos.coords.latitude, lon:pos.coords.longitude};
+  if(live.lastPos){ const d=haversine(live.lastPos,p); if(d<50) live.dist+=d; }
+  live.lastPos=p;
+}
+
+function liveTick(){
+  const now=Date.now();
+  if(live.mode==='sim') live.dist += 1000/live.simPace; // 1초당 이동거리(m)
+  const elapsed=(now-live.startTs)/1000;
+  live.window.push({t:now,d:live.dist});
+  live.window=live.window.filter(p=>now-p.t<=6000);
+  let cur=0;
+  if(live.window.length>=2){
+    const a=live.window[0], b=live.window[live.window.length-1];
+    const dd=(b.d-a.d)/1000, dt=(b.t-a.t)/1000;
+    if(dd>0) cur=dt/dd;
+  }
+  const avg=live.dist>0?elapsed/(live.dist/1000):0;
+  document.getElementById('lvTime').textContent=fmtDur(elapsed/60);
+  document.getElementById('lvDist').textContent=(live.dist/1000).toFixed(2)+' km';
+  document.getElementById('lvCur').textContent=cur>0?fmtSec(Math.round(cur)):'-';
+  document.getElementById('lvAvg').textContent=avg>0?fmtSec(Math.round(avg)):'-';
+  const delta=cur>0?Math.round(cur-live.target):0;
+  const dEl=document.getElementById('lvDelta');
+  if(cur>0){
+    dEl.textContent=(delta>0?'+':'')+delta+'초/km '+(delta>10?'느림 🐢':delta<-10?'빠름 🔥':'딱 좋아 ✅');
+    dEl.style.color=delta>10?'#ff9a9a':delta<-10?'#ffd27a':'#3da58a';
+  }
+  const km=Math.floor(live.dist/1000);
+  if(km>live.kmDone){ live.kmDone=km; onKm(km,elapsed); }
+  if(now-live.lastCueTs>15000 && cur>0){ live.lastCueTs=now; doCue(cur,delta); }
+}
+
+function doCue(cur,delta){
+  let msg;
+  if(delta>15) msg='페이스가 느려지고 있어! 조금만 더 힘내서 속도 올려보자 💪';
+  else if(delta<-15) msg='너무 빠른데? 초반에 힘 빼지 말고 페이스 유지하자';
+  else msg='좋아! 목표 페이스 딱 맞아, 이대로 가자 👍';
+  document.getElementById('lvCueBox').textContent='🗣️ '+msg;
+  speak(msg);
+}
+async function onKm(km,elapsed){
+  const split=fmtSec(Math.round(elapsed - (live.kmSplitTs||0)));
+  live.kmSplitTs=elapsed;
+  const base=km+'킬로미터 통과! 스플릿 '+split;
+  document.getElementById('lvCueBox').textContent='✅ '+base;
+  speak(base);
+  if(live.ai){
+    const key=document.getElementById('apiKey').value.trim();
+    if(!key) return;
+    try{
+      const prompt='러닝 코치로서 딱 한 문장, 20자 내외로 짧고 힘차게 응원해줘. 지금 '+km+'km 지났고 페이스는 목표에 '+(parsePace(document.getElementById('liveTarget').value))+'초 기준이야. 한국어로.';
+      const old=modal.img; modal.img=null;
+      const line=provider==='gemini'?await callGemini(key,prompt):await callClaude(key,prompt);
+      modal.img=old;
+      const clean=line.replace(/\n/g,' ').slice(0,60);
+      document.getElementById('lvCueBox').textContent='🤖 '+clean;
+      speak(clean);
+    }catch(e){ /* 토큰/네트워크 문제시 조용히 패스 */ }
+  }
+}
+
+function stopLive(){
+  stopTimers(); live.running=false;
+  const elapsed=(Date.now()-live.startTs)/1000;
+  const km=(live.dist/1000);
+  const avg=km>0?elapsed/km:0;
+  speak('수고했어! '+km.toFixed(1)+'킬로미터 완주!');
+  document.getElementById('liveRun').style.display='none';
+  const sum=document.getElementById('liveSummary');
+  sum.style.display='block';
+  sum.innerHTML=`
+    <h3 style="margin-top:6px">🏁 완주!</h3>
+    <div class="stats">
+      <div class="stat-box"><div class="k">거리</div><div class="v">${km.toFixed(2)} km</div></div>
+      <div class="stat-box"><div class="k">시간</div><div class="v">${fmtDur(elapsed/60)}</div></div>
+      <div class="stat-box"><div class="k">평균 페이스</div><div class="v">${avg>0?fmtSec(Math.round(avg)):'-'}</div></div>
+      <div class="stat-box"><div class="k">목표 페이스</div><div class="v">${fmtSec(live.target)}</div></div>
+    </div>
+    <button class="btn" onclick="coachLiveRun(${km.toFixed(3)},${Math.round(elapsed)})">💪 이 달리기 전체 코칭 받기</button>
+    <div id="liveCoach" class="out"></div>
+    <button class="btn-sm" style="width:100%;margin-top:10px" onclick="closeLive()">닫기</button>`;
+}
+
+async function coachLiveRun(km,sec){
+  const key=document.getElementById('apiKey').value.trim();
+  const out=document.getElementById('liveCoach');
+  if(!key){ out.innerHTML='<div class="err">AI 설정에서 키를 먼저 넣어줘!</div>'; return; }
+  out.innerHTML='<span class="spinner"></span>코치가 분석 중...';
+  const pace=km>0?Math.round(sec/km):0;
+  const prompt=`너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n[방금 라이브 러닝] 거리 ${km.toFixed(2)}km, 시간 ${fmtDur(sec/60)}, 평균 페이스 ${fmtSec(pace)}, 목표 페이스 ${fmtSec(live.target)}\n[목표] 10km 50분 이내\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n### 3. 페이스 전략\n핵심만 짧게.`;
+  try{
+    const old=modal.img; modal.img=null;
+    const text=provider==='gemini'?await callGemini(key,prompt):await callClaude(key,prompt);
+    modal.img=old;
+    out.innerHTML=renderMd(text);
+  }catch(e){ out.innerHTML='<div class="err">실패: '+e.message+'</div>'; }
+}
+
+init();
+</script>
+</body>
+</html>
