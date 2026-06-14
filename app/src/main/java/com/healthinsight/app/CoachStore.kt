@@ -68,6 +68,14 @@ class CoachStore(context: Context) {
         get() = prefs.getString("splash_date", "") ?: ""
         set(v) = prefs.edit().putString("splash_date", v).apply()
 
+    /** 운동 목록 로컬 캐시 + 마지막 fetch 날짜 */
+    var workoutsCache: String
+        get() = prefs.getString("workouts_cache", "") ?: ""
+        set(v) = prefs.edit().putString("workouts_cache", v).apply()
+    var lastFetchDate: String
+        get() = prefs.getString("last_fetch_date", "") ?: ""
+        set(v) = prefs.edit().putString("last_fetch_date", v).apply()
+
     // ----- 숨긴 운동 (중복/원치 않는 기록을 앱에서 안 보이게) -----
     fun hiddenIds(): Set<Long> =
         (prefs.getStringSet("hidden", emptySet()) ?: emptySet()).mapNotNull { it.toLongOrNull() }.toSet()

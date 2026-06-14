@@ -156,7 +156,7 @@ class MainActivity : ComponentActivity() {
             HealthConnectClient.SDK_AVAILABLE -> lifecycleScope.launch {
                 val has = repo.hasAllPermissions()
                 ui.value = ui.value.copy(available = true, hasPermission = has)
-                if (has) loadAll()
+                if (has) loadCachedThenMaybeFetch()
             }
             HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
                 ui.value = ui.value.copy(message = "Health Connect 업데이트가 필요해요.")
@@ -164,11 +164,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 켤 때: 캐시 먼저 즉시 표시 → 새 날(또는 캐시 없음)이면 백그라운드로 갱신 */
+    private fun loadCachedThenMaybeFetch() {
+        val cached = WorkoutCache.fromJson(store.workoutsCache)
+        if (cached.isNotEmpty()) ui.value = ui.value.copy(workouts = cached, loading = false)
+        val today = java.time.LocalDate.now().toString()
+        if (cached.isEmpty() || store.lastFetchDate != today) loadAll()
+    }
+
+    /** Health Connect에서 새로 읽어 캐시 갱신 (수동 새로고침 / 하루 첫 실행) */
     private fun loadAll() {
         lifecycleScope.launch {
             ui.value = ui.value.copy(loading = true, message = null)
             try {
                 val ws = repo.allWorkouts(120)
+                store.workoutsCache = WorkoutCache.toJson(ws)
+                store.lastFetchDate = java.time.LocalDate.now().toString()
                 ui.value = ui.value.copy(loading = false, workouts = ws,
                     message = if (ws.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 새로고침 해보세요!" else null)
             } catch (e: Exception) {
