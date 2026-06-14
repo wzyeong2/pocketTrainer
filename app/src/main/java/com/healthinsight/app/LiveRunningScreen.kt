@@ -62,12 +62,26 @@ fun LiveRunningScreen(
                     val key = store.keyFor(store.provider)
                     if (key.isBlank()) { summaryCoach = "AI 설정에서 키를 먼저 넣어줘!"; return@FinishedView }
                     coachLoading = true; summaryCoach = null
+                    store.recordAiCall()
                     scope.launch {
                         val pace = if (km > 0) (sec / km).roundToInt() else 0
-                        val prompt = "너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n" +
-                            "[방금 라이브 러닝] 거리 ${"%.2f".format(km)}km, 시간 ${mmss(sec.toInt())}, 평균 페이스 ${mmss(pace)}\n" +
-                            "[목표] 10km 50분 이내\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n### 3. 페이스 전략\n핵심만 짧게."
-                        val r = AiCoach.generate(store.provider, key, prompt)
+                        val sb = StringBuilder("너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n")
+                        if (store.athleteProfile.isNotBlank()) sb.append("[내 프로필] ${store.athleteProfile}\n")
+                        sb.append("[방금 라이브 러닝] 거리 ${"%.2f".format(km)}km, 시간 ${mmss(sec.toInt())}, 평균 페이스 ${mmss(pace)}\n")
+                        BleHeart.bpm?.let { sb.append("[종료 시 심박] ${it}bpm\n") }
+                        if (LiveCoach.goalType == "program" && LiveCoach.programSegments.isNotEmpty()) {
+                            sb.append("\n[처방됐던 세션] ${LiveCoach.programTitle}\n")
+                            LiveCoach.programSegments.forEach { s ->
+                                val tp = if (s.targetPaceSec > 0) " 목표${mmss(s.targetPaceSec)}" else ""
+                                val th = if (s.targetHr > 0) " 심박${s.targetHr}" else ""
+                                sb.append("- ${s.label} ${s.durationSec / 60}분$tp$th\n")
+                            }
+                            sb.append("\n위 처방 세션을 실제로 뛴 결과야. 처방 대비 얼마나 지켰는지(페이스·심박 목표 달성도) 평가해줘.\n")
+                            sb.append("### 1. 처방 준수 평가\n### 2. 잘한 점·아쉬운 점\n### 3. 다음 세션 조언\n핵심만 짧게.")
+                        } else {
+                            sb.append("[목표] 10km 50분 이내\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n### 3. 페이스 전략\n핵심만 짧게.")
+                        }
+                        val r = AiCoach.generate(store.provider, key, sb.toString())
                         coachLoading = false
                         summaryCoach = r.fold({ it }, { "실패: ${it.message}" })
                     }
