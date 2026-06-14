@@ -373,6 +373,14 @@ fun MainScreen(
                             val th = if (seg.targetHr > 0) " ·${seg.targetHr}bpm" else ""
                             Text("   - ${seg.label} ${seg.durationSec / 60}분$tp$th", fontSize = 12.sp)
                         }
+                        if (s.segments.any { it.durationSec > 0 }) {
+                            TextButton(onClick = {
+                                LiveCoach.programSegments = s.segments
+                                LiveCoach.programTitle = s.title
+                                LiveCoach.goalType = "program"
+                                onLive()
+                            }) { Text("▶️ 이 세션 라이브로") }
+                        }
                     }
                 }
                 programErr?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }

@@ -57,6 +57,10 @@ object LiveCoach {
     var intervalSets by mutableStateOf(6)
     var intervalLabel by mutableStateOf("")   // 현재 인터벌 상태 표시 (예: "빠르게 3/6")
     var targetHr by mutableStateOf(145)        // 심박존 목표
+
+    // 프로그램 모드: 처방된 세션을 라이브로 재생
+    var programSegments by mutableStateOf<List<ProgramSegment>>(emptyList())
+    var programTitle by mutableStateOf("")
 }
 
 /**
@@ -75,6 +79,7 @@ class LiveCoachService : Service() {
     private val window = ArrayDeque<Pair<Long, Double>>()
     private var goalAnnounced = false
     private var lastIntervalPhase = ""
+    private var lastProgSeg = -1
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -97,7 +102,7 @@ class LiveCoachService : Service() {
     private fun startRun() {
         startTs = System.currentTimeMillis()
         lastCueMs = 0L; kmSplitSec = 0.0; lastLoc = null; window.clear()
-        goalAnnounced = false; lastIntervalPhase = ""; LiveCoach.intervalLabel = ""
+        goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -153,6 +158,7 @@ class LiveCoachService : Service() {
 
     private fun handleGoal(now: Long) {
         when (LiveCoach.goalType) {
+            "program" -> handleProgram(now)
             "hr" -> handleHrZone(now)
             "interval" -> handleInterval()
             "distance" -> {
@@ -176,6 +182,52 @@ class LiveCoachService : Service() {
                 }
             }
             else -> paceTick(now) // pace
+        }
+    }
+
+    private fun handleProgram(now: Long) {
+        val segs = LiveCoach.programSegments
+        if (segs.isEmpty()) { paceTick(now); return }
+        val total = LiveCoach.elapsedSec
+        var acc = 0L; var idx = -1
+        for (i in segs.indices) {
+            val end = acc + segs[i].durationSec
+            if (total < end) { idx = i; break }
+            acc = end
+        }
+        if (idx < 0) { // 모든 구간 완료
+            if (lastProgSeg != -999) {
+                lastProgSeg = -999
+                val m = "프로그램 세션 완료! 정말 잘했어"; LiveCoach.cue = "🎯 $m"; speak(m)
+            }
+            return
+        }
+        val seg = segs[idx]
+        LiveCoach.intervalLabel = "${seg.label} (${idx + 1}/${segs.size})"
+        if (idx != lastProgSeg) { // 새 구간 시작 안내
+            lastProgSeg = idx
+            val tp = if (seg.targetPaceSec > 0) ", 목표 ${mmss(seg.targetPaceSec)}" else ""
+            val th = if (seg.targetHr > 0) ", 심박 ${seg.targetHr}" else ""
+            val m = "${seg.label}, ${seg.durationSec / 60}분$tp$th"
+            LiveCoach.cue = "📋 $m"; speak(m); lastCueMs = now
+            return
+        }
+        // 구간 중 페이스+심박 통합 준수 체크 (15초마다)
+        if (now - lastCueMs > 15000) {
+            lastCueMs = now
+            val paceOk = seg.targetPaceSec <= 0 || LiveCoach.curPace <= 0 ||
+                kotlin.math.abs(LiveCoach.curPace - seg.targetPaceSec) <= 15
+            val hr = BleHeart.bpm
+            val hrHigh = seg.targetHr > 0 && hr != null && hr > seg.targetHr + 5
+            val msg = when {
+                !paceOk && hrHigh -> "페이스도 심박도 높아, 무리 말고 줄여"
+                paceOk && hrHigh -> "페이스는 좋은데 심박 ${hr} 높아 — 오르막/피로일 수 있어, 살짝 줄여"
+                !paceOk && LiveCoach.curPace > seg.targetPaceSec -> "페이스 느려, 목표 ${mmss(seg.targetPaceSec)}로 올려"
+                !paceOk -> "페이스 빨라, 목표 ${mmss(seg.targetPaceSec)}로 줄여"
+                seg.targetHr > 0 && hr != null && hr < seg.targetHr - 10 -> "여유 있어, 조금 올려도 돼"
+                else -> "좋아, 이 구간 잘 지키고 있어"
+            }
+            LiveCoach.cue = "🗣️ $msg"; speak(msg)
         }
     }
 

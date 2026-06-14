@@ -118,6 +118,17 @@ private fun SetupView(
         "distance" -> OutlinedTextField(distText, onDist, label = { Text("목표 거리 (km)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         "time" -> OutlinedTextField(timeText, onTime, label = { Text("목표 시간 (분)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         "hr" -> OutlinedTextField(hrText, onHr, label = { Text("목표 심박수 (bpm) — 심박 센서 필요") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        "program" -> Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("📋 ${LiveCoach.programTitle}", fontWeight = FontWeight.Bold)
+                LiveCoach.programSegments.forEach { seg ->
+                    val tp = if (seg.targetPaceSec > 0) " @${mmss(seg.targetPaceSec)}" else ""
+                    val th = if (seg.targetHr > 0) " ·${seg.targetHr}bpm" else ""
+                    Text("• ${seg.label} ${seg.durationSec / 60}분$tp$th", fontSize = 13.sp)
+                }
+                Text("시작하면 이 순서대로 음성 가이드 + 페이스·심박 체크!", fontSize = 11.sp)
+            }
+        }
         "interval" -> {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(workText, onWork, label = { Text("빠르게(초)") }, singleLine = true, modifier = Modifier.weight(1f))
@@ -193,9 +204,9 @@ private fun RunningView(context: android.content.Context) {
             )
         }
     }
-    if (LiveCoach.goalType == "interval" && LiveCoach.intervalLabel.isNotBlank()) {
+    if ((LiveCoach.goalType == "interval" || LiveCoach.goalType == "program") && LiveCoach.intervalLabel.isNotBlank()) {
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-            Text("인터벌: ${LiveCoach.intervalLabel}", Modifier.padding(14.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("${if (LiveCoach.goalType == "program") "📋" else "인터벌:"} ${LiveCoach.intervalLabel}", Modifier.padding(14.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
         }
     } else if (LiveCoach.goalType == "pace" && LiveCoach.curPace > 0) {
         val delta = LiveCoach.curPace - LiveCoach.targetPace
