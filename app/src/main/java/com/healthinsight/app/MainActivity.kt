@@ -401,7 +401,10 @@ fun MainScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("🏃 포켓 트레이너", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MascotBadge(34)
+                Text("포켓 트레이너", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = onLive, label = { Text("🔴 라이브") })
                 AssistChip(onClick = { settingsOpen = true }, label = { Text("⚙️") })
