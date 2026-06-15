@@ -11,6 +11,9 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,8 +30,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,6 +51,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 private val TYPE_COLORS = mapOf(
@@ -257,6 +264,7 @@ class MainActivity : ComponentActivity() {
         sb.appendLine("- 최종 목표: 10km 50분 이내(5:00/km)")
         val note = store.athleteProfile
         if (note.isNotBlank()) sb.appendLine("- 본인 메모: $note")
+        if (store.lastProgramResult.isNotBlank()) sb.appendLine("- 지난 프로그램 세션 결과: ${store.lastProgramResult}")
         return sb.toString()
     }
 }
@@ -409,6 +417,8 @@ fun MainScreen(
                 }
             } }
         }
+
+        StatsCard(state.workouts)
 
         if (state.loading) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -839,6 +849,37 @@ private fun SettingsDialog(store: CoachStore, onClose: () -> Unit) {
 }
 
 @Composable
+private fun StatsCard(workouts: List<WorkoutRecord>) {
+    val runs = workouts.filter { it.type == ExerciseType.RUNNING && it.distanceMeters > 0 }
+    if (runs.isEmpty()) return
+    val today = LocalDate.now()
+    val weekKm = DoubleArray(8)
+    runs.forEach { w ->
+        val wk = (ChronoUnit.DAYS.between(w.id.toLocalDate(), today) / 7).toInt()
+        if (wk in 0..7) weekKm[wk] += w.distanceKm
+    }
+    val maxKm = maxOf(weekKm.maxOrNull() ?: 1.0, 1.0)
+    val barColor = MaterialTheme.colorScheme.primary
+    Card { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("📊 주간 달리기 거리 (최근 8주)", fontWeight = FontWeight.Bold)
+        Canvas(Modifier.fillMaxWidth().height(110.dp)) {
+            val n = 8
+            val gap = 6.dp.toPx()
+            val bw = (size.width - gap * (n - 1)) / n
+            for (i in 0 until n) {
+                val km = weekKm[7 - i] // 왼쪽=오래된 주, 오른쪽=이번 주
+                val h = (km / maxKm * (size.height - 4)).toFloat()
+                drawRect(color = barColor, topLeft = Offset(i * (bw + gap), size.height - h), size = Size(bw, h))
+            }
+        }
+        Text(
+            "이번 주 ${"%.1f".format(weekKm[0])}km · 최고 주 ${"%.1f".format(maxKm)}km · 8주 합 ${"%.1f".format(weekKm.sum())}km",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    } }
+}
+
+@Composable
 private fun InfoCard(title: String, body: String) {
     Card { Column(Modifier.padding(16.dp)) {
         Text(title, fontWeight = FontWeight.Bold); Text(body)
@@ -882,9 +923,17 @@ private fun ConsentScreen(onAccept: () -> Unit) {
 
 @Composable
 private fun SplashScreen(onDone: () -> Unit) {
-    LaunchedEffect(Unit) { delay(1500); onDone() }
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { anim.animateTo(1f, tween(700)); delay(900); onDone() }
     Box(Modifier.fillMaxSize().background(Color(0xFF2E7D6B)), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.graphicsLayer {
+                alpha = anim.value
+                val s = 0.85f + 0.15f * anim.value
+                scaleX = s; scaleY = s
+            }
+        ) {
             Text("🌳", fontSize = 64.sp)
             Spacer(Modifier.height(12.dp))
             Text("포켓 트레이너", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)

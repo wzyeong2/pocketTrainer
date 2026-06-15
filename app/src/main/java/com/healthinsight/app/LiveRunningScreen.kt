@@ -78,6 +78,9 @@ fun LiveRunningScreen(
                             }
                             sb.append("\n위 처방 세션을 실제로 뛴 결과야. 처방 대비 얼마나 지켰는지(페이스·심박 목표 달성도) 평가해줘.\n")
                             sb.append("### 1. 처방 준수 평가\n### 2. 잘한 점·아쉬운 점\n### 3. 다음 세션 조언\n핵심만 짧게.")
+                            // 다음 프로그램 생성에 반영할 결과 저장
+                            store.lastProgramResult = "세션 '${LiveCoach.programTitle}' 실제 ${"%.2f".format(km)}km, 평균 ${mmss(pace)}" +
+                                (BleHeart.bpm?.let { ", 종료심박 ${it}" } ?: "")
                         } else {
                             sb.append("[목표] 10km 50분 이내\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n### 3. 페이스 전략\n핵심만 짧게.")
                         }
