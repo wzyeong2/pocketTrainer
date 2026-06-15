@@ -411,9 +411,11 @@ fun MainScreen(
         if (!state.available) { InfoCard("Health Connect 사용 불가", state.message ?: ""); return@Column }
 
         if (!state.hasPermission) {
-            Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("연결이 필요해요", fontWeight = FontWeight.Bold)
-                Text("운동 기록(달리기·헬스·걷기 등)을 읽으려면 권한을 허용해줘.")
+            Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                MascotBadge(96)
+                Text("안녕! 나는 포켓 트레이너야 👋", fontWeight = FontWeight.Bold)
+                Text("운동 기록(달리기·헬스·걷기 등)을 읽으려면 권한을 허용해줘.", textAlign = TextAlign.Center)
                 Button(onClick = onConnect) { Text("Health Connect 연결하기") }
             } }
             state.message?.let { Spacer(Modifier.height(4.dp)); Text(it, color = MaterialTheme.colorScheme.error) }
@@ -543,7 +545,11 @@ fun MainScreen(
             }
         }
         if (listWorkouts.isEmpty()) {
-            Text("해당 조건의 운동이 없어요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MascotBadge(80)
+                Text("아직 여기엔 운동이 없어요. 한 번 뛰고 올까? 🏃", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            }
         } else {
             listWorkouts.forEach { w ->
                 WorkoutItem(w, coached = store.getCoaching(w.id) != null) { onOpenDetail(); detail = w }
@@ -1047,6 +1053,18 @@ private fun StatsCard(workouts: List<WorkoutRecord>) {
     } }
 }
 
+/** 흰 동그라미 안에 마스코트 (다크 배경에서 깔끔하게) */
+@Composable
+private fun MascotBadge(size: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(size.dp).clip(CircleShape).background(Color.White),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(painterResource(R.drawable.mascot), "포켓 트레이너 마스코트",
+            Modifier.size((size - 6).dp), contentScale = ContentScale.Fit)
+    }
+}
+
 @Composable
 private fun InfoCard(title: String, body: String) {
     Card { Column(Modifier.padding(16.dp)) {
@@ -1081,7 +1099,11 @@ private fun ConsentScreen(onAccept: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Spacer(Modifier.height(12.dp))
-        Text("🏃 포켓 트레이너", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { MascotBadge(120) }
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text("🏃 포켓 트레이너", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
         Text("개인정보 처리방침 및 이용 동의", fontWeight = FontWeight.Bold)
         Card { Text(PRIVACY_TEXT, Modifier.padding(14.dp), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) { Text("동의하고 시작하기") }
