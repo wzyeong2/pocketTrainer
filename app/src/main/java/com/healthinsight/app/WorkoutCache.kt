@@ -21,6 +21,7 @@ object WorkoutCache {
                 put("cal", w.calories ?: -1.0)
                 put("elev", w.elevationGainM ?: -1.0)
                 put("steps", w.steps ?: -1L)
+                put("maxSpd", w.maxSpeedMps ?: -1.0)
                 put("src", w.source)
                 put("watch", w.fromWatch)
             })
@@ -46,6 +47,7 @@ object WorkoutCache {
                     calories = o.getDouble("cal").takeIf { it >= 0 },
                     elevationGainM = o.getDouble("elev").takeIf { it >= 0 },
                     steps = o.getLong("steps").takeIf { it >= 0 },
+                    maxSpeedMps = o.optDouble("maxSpd", -1.0).takeIf { it >= 0 },
                     splits = emptyList(),
                     source = o.optString("src", ""),
                     fromWatch = o.optBoolean("watch", false),

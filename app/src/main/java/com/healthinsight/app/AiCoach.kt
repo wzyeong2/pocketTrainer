@@ -41,10 +41,11 @@ object AiCoach {
         Result.failure(lastError ?: RuntimeException("네트워크 오류로 실패했어요"))
     }
 
-    /** 선수 정보 기반 주간 러닝 프로그램 생성 (JSON 원본 반환) */
-    suspend fun generateProgram(provider: String, apiKey: String, profile: String): Result<String> {
+    /** 선수 정보 기반 주간 러닝 프로그램 생성 (JSON 원본 반환). sessions=주당 훈련 횟수 */
+    suspend fun generateProgram(provider: String, apiKey: String, profile: String, sessions: Int = 3): Result<String> {
+        val n = sessions.coerceIn(1, 7)
         val prompt = buildString {
-            appendLine("너는 러닝 코치야. 아래 선수 정보를 바탕으로 '이번 주 러닝 훈련 3회' 프로그램을 설계해.")
+            appendLine("너는 러닝 코치야. 아래 선수 정보를 바탕으로 '이번 주 러닝 훈련 ${n}회' 프로그램을 설계해.")
             appendLine()
             append(profile)
             appendLine()
@@ -52,10 +53,14 @@ object AiCoach {
             appendLine("형식:")
             appendLine("{\"sessions\":[{\"title\":\"화 - 이지런\",\"focus\":\"유산소 지구력\",\"segments\":[{\"label\":\"워밍업 걷기\",\"durationSec\":300,\"targetPaceSec\":0,\"targetHr\":0},{\"label\":\"이지런\",\"durationSec\":1500,\"targetPaceSec\":390,\"targetHr\":142}]}]}")
             appendLine("규칙: durationSec=초, targetPaceSec=초/km(없으면 0), targetHr=bpm(없으면 0).")
-            appendLine("세션 정확히 3개. 각 세션은 워밍업·메인·쿨다운 등 2~5구간. 사용자 레벨·목표·부상·고도보정·심박존을 반영하고 무리한 부하는 금지.")
+            appendLine("세션 정확히 ${n}개. 각 세션은 워밍업·메인·쿨다운 등 2~5구간. 강도(이지/템포/인터벌/롱런)를 한 주 안에서 적절히 분배하고, 사용자 레벨·목표·부상·고도보정·심박존을 반영하고 무리한 부하는 금지.")
         }
         return generate(provider, apiKey, prompt, null)
     }
+
+    /** 훈련량(최근 3주 러닝 횟수)으로 주당 적정 훈련 횟수 추천 (2~5회) */
+    fun recommendSessions(recentRunsLast21Days: Int): Int =
+        Math.round(recentRunsLast21Days / 3.0).toInt().coerceIn(2, 5)
 
     /** 429/quota 등 원시 오류를 사용자 친화 메시지로 변환 */
     private fun friendlyError(raw: String): String {

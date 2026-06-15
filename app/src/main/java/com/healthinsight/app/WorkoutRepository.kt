@@ -131,14 +131,17 @@ class WorkoutRepository(private val context: Context) {
         } catch (_: Exception) {}
 
         var calories: Double? = null; var elevation: Double? = null; var steps: Long? = null
+        var maxSpeed: Double? = null
         try {
             val opt = client.aggregate(AggregateRequest(setOf(
                 TotalCaloriesBurnedRecord.ENERGY_TOTAL, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
-                ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL), filter))
+                ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL,
+                SpeedRecord.SPEED_MAX), filter))
             calories = opt[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
                 ?: opt[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
             elevation = opt[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
             steps = opt[StepsRecord.COUNT_TOTAL]
+            maxSpeed = opt[SpeedRecord.SPEED_MAX]?.inMetersPerSecond
         } catch (_: Exception) {}
 
         return WorkoutRecord(
@@ -152,6 +155,7 @@ class WorkoutRepository(private val context: Context) {
             calories = calories,
             elevationGainM = elevation,
             steps = steps,
+            maxSpeedMps = maxSpeed,
             splits = emptyList(),
             source = sourceLabel(session),
             fromWatch = isWatch(session),

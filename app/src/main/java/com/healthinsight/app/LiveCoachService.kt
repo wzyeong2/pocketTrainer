@@ -44,7 +44,7 @@ object LiveCoach {
     var cue by mutableStateOf("코칭 준비 중...")
     var targetPace by mutableStateOf(330)
     var simPace by mutableStateOf(360)
-    var mode by mutableStateOf("sim")     // sim / gps
+    var mode by mutableStateOf("gps")     // gps / sim — 기본은 실제 GPS (시뮬은 테스트용)
     var voice by mutableStateOf(true)
     var aiOn by mutableStateOf(false)
 

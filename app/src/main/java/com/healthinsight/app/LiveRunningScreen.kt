@@ -179,14 +179,23 @@ private fun SetupView(
 
     Text("모드", fontWeight = FontWeight.Bold)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(LiveCoach.mode == "sim", { LiveCoach.mode = "sim" }, { Text("🎮 시뮬레이션") })
         FilterChip(LiveCoach.mode == "gps", { LiveCoach.mode = "gps"; if (!hasLoc) onRequestLoc() }, { Text("📍 실제 GPS") })
+        FilterChip(LiveCoach.mode == "sim", { LiveCoach.mode = "sim" }, { Text("🎮 시뮬레이션") })
     }
-    Text(
-        if (LiveCoach.mode == "sim") "시뮬레이션: 안 뛰고 음성 코칭 테스트 (빠르게/느리게 버튼)"
-        else "실제 GPS: 벨트/주머니에 폰 넣고 뛰어도 음성 코칭 계속됨 (블루투스 이어폰 권장)",
-        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    if (LiveCoach.mode == "sim") {
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+            Text(
+                "⚠️ 테스트용 모드예요 — 실제 GPS 측정이 아니라 페이스를 자동으로 만들어내요. " +
+                    "진짜로 뛰실 땐 위에서 '📍 실제 GPS'를 선택하세요.",
+                Modifier.padding(12.dp), fontSize = 12.sp
+            )
+        }
+    } else {
+        Text(
+            "실제 GPS: 벨트/주머니에 폰 넣고 뛰어도 음성 코칭 계속됨 (블루투스 이어폰 권장)",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
     Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(LiveCoach.voice, { LiveCoach.voice = it }); Text("🔊 음성 코칭") }
     Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(LiveCoach.aiOn, { LiveCoach.aiOn = it }); Text("🤖 km마다 AI 응원 (토큰 소량)") }
     Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("▶️ 시작") }
@@ -199,6 +208,11 @@ private fun goalChip(label: String, value: String) {
 
 @Composable
 private fun RunningView(context: android.content.Context) {
+    if (LiveCoach.mode == "sim") {
+        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+            Text("🎮 시뮬레이션 중 — 아래 페이스는 실제 측정이 아니에요 (테스트용)", Modifier.padding(12.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         LiveStat("⏱️ 시간", "%d:%02d".format(LiveCoach.elapsedSec / 60, LiveCoach.elapsedSec % 60), Modifier.weight(1f))
         LiveStat("📏 거리", "%.2f km".format(LiveCoach.distM / 1000), Modifier.weight(1f))

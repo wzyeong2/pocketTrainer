@@ -11,8 +11,8 @@ android {
         applicationId = "com.exercisecoach.runapp"
         minSdk = 28
         targetSdk = 34
-        versionCode = 24
-        versionName = "0.24"
+        versionCode = 25
+        versionName = "0.25"
     }
 
     buildTypes {

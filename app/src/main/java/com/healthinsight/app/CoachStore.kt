@@ -81,6 +81,11 @@ class CoachStore(context: Context) {
         get() = prefs.getString("last_fetch_date", "") ?: ""
         set(v) = prefs.edit().putString("last_fetch_date", v).apply()
 
+    /** 앱을 마지막으로 연 날짜 — '오늘 첫 방문' 안내용 (fetch 여부와 무관) */
+    var lastSeenDate: String
+        get() = prefs.getString("last_seen_date", "") ?: ""
+        set(v) = prefs.edit().putString("last_seen_date", v).apply()
+
     // ----- 숨긴 운동 (중복/원치 않는 기록을 앱에서 안 보이게) -----
     fun hiddenIds(): Set<Long> =
         (prefs.getStringSet("hidden", emptySet()) ?: emptySet()).mapNotNull { it.toLongOrNull() }.toSet()

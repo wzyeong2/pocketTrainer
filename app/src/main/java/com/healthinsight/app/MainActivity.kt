@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
                                 capturedBitmap = capturedBitmap.value,
                                 onConnect = { requestHc.launch(WorkoutRepository.PERMISSIONS) },
                                 onRefresh = { loadAll() },
+                                onDismissFirstVisit = { ui.value = ui.value.copy(firstVisitToday = false) },
                                 onLive = { screen.value = "live" },
                                 onTakePhoto = { takePicture.launch(null) },
                                 onPickPhoto = { pickImage.launch("image/*") },
@@ -171,24 +172,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 켤 때: 캐시 먼저 즉시 표시 → 새 날(또는 캐시 없음)이면 백그라운드로 갱신 */
+    /**
+     * 켤 때: 저장된 캐시를 즉시 보여주기만 한다 (자동 갱신 안 함).
+     * 캐시가 아예 없으면(=첫 사용) 한 번만 자동으로 가져온다.
+     * 오늘 처음 연 거면 '새 기록 불러오기' 안내를 띄운다.
+     */
     private fun loadCachedThenMaybeFetch() {
         val cached = WorkoutCache.fromJson(store.workoutsCache)
-        if (cached.isNotEmpty()) ui.value = ui.value.copy(workouts = cached, loading = false)
         val today = java.time.LocalDate.now().toString()
-        if (cached.isEmpty() || store.lastFetchDate != today) loadAll()
+        val firstToday = store.lastSeenDate != today
+        store.lastSeenDate = today
+        if (cached.isNotEmpty()) {
+            ui.value = ui.value.copy(workouts = cached, loading = false, firstVisitToday = firstToday)
+        } else {
+            loadAll() // 캐시 없음 → 최초 1회 자동 로드
+        }
     }
 
-    /** Health Connect에서 새로 읽어 캐시 갱신 (수동 새로고침 / 하루 첫 실행) */
+    /** Health Connect에서 새로 읽어 캐시 갱신 (수동 '새 기록 불러오기' 전용) */
     private fun loadAll() {
         lifecycleScope.launch {
-            ui.value = ui.value.copy(loading = true, message = null)
+            ui.value = ui.value.copy(loading = true, message = null, firstVisitToday = false)
             try {
                 val ws = repo.allWorkouts(120)
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
-                ui.value = ui.value.copy(loading = false, workouts = ws,
-                    message = if (ws.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 새로고침 해보세요!" else null)
+                ui.value = ui.value.copy(loading = false, workouts = ws, firstVisitToday = false,
+                    message = if (ws.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
             } catch (e: Exception) {
                 ui.value = ui.value.copy(loading = false, message = "데이터를 읽지 못했어요: ${e.message}")
                 Toast.makeText(this@MainActivity, "데이터를 읽지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
@@ -204,14 +214,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** AI 주간 프로그램 생성 (기록+프로필 기반) → 성공 시 저장 */
-    private fun generateProgram(onResult: (Result<String>) -> Unit) {
+    /** AI 주간 프로그램 생성 (기록+프로필 기반, sessions=주당 횟수) → 성공 시 저장 */
+    private fun generateProgram(sessions: Int, onResult: (Result<String>) -> Unit) {
         val provider = store.provider
         val key = store.keyFor(provider)
         if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
-            val r = AiCoach.generateProgram(provider, key, athleteContext())
+            val r = AiCoach.generateProgram(provider, key, athleteContext(), sessions)
             r.onSuccess { store.programJson = it; store.programDate = java.time.LocalDate.now().toString() }
             onResult(r)
         }
@@ -275,6 +285,7 @@ data class UiState(
     val loading: Boolean = false,
     val workouts: List<WorkoutRecord> = emptyList(),
     val message: String? = null,
+    val firstVisitToday: Boolean = false,   // 오늘 첫 방문 → 새 기록 불러오기 안내
 )
 
 private fun jpegBytes(bmp: Bitmap): ByteArray {
@@ -300,6 +311,7 @@ fun MainScreen(
     capturedBitmap: Bitmap?,
     onConnect: () -> Unit,
     onRefresh: () -> Unit,
+    onDismissFirstVisit: () -> Unit,
     onLive: () -> Unit,
     onTakePhoto: () -> Unit,
     onPickPhoto: () -> Unit,
@@ -308,7 +320,7 @@ fun MainScreen(
     coachWorkout: (WorkoutRecord, String, (Result<String>) -> Unit) -> Unit,
     loadSplits: (WorkoutRecord, (List<Split>) -> Unit) -> Unit,
     dailyCoach: (List<WorkoutRecord>, (Result<String>) -> Unit) -> Unit,
-    generateProgram: ((Result<String>) -> Unit) -> Unit,
+    generateProgram: (Int, (Result<String>) -> Unit) -> Unit,
 ) {
     var filter by remember { mutableStateOf<ExerciseType?>(null) }
     var dailyDialog by remember { mutableStateOf(false) }
@@ -359,6 +371,20 @@ fun MainScreen(
             return@Column
         }
 
+        // 오늘 첫 방문 안내 — 새 기록 불러오기 권유 (자동 갱신은 안 함)
+        if (state.firstVisitToday) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("👋 오늘 처음 오셨네요!", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        TextButton(onDismissFirstVisit) { Text("나중에") }
+                    }
+                    Text("새 운동을 했다면 최신 기록을 불러올까요?", fontSize = 13.sp)
+                    Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("⬇️ 새 기록 불러오기") }
+                }
+            }
+        }
+
         // 운동별 필터
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(filter == null, { filter = null; selectedDate = null }, { Text("📋 전체") })
@@ -376,13 +402,36 @@ fun MainScreen(
         // AI 주간 프로그램 (기록 5개 이상)
         val runCount = state.workouts.count { it.type == ExerciseType.RUNNING }
         if (runCount >= 5) {
+            val runsLast21 = state.workouts.count {
+                it.type == ExerciseType.RUNNING && !it.id.toLocalDate().isBefore(LocalDate.now().minusDays(21))
+            }
+            val recommended = AiCoach.recommendSessions(runsLast21)
+            var sessionCount by remember(recommended) { mutableStateOf(recommended) }
+            var countMenuOpen by remember { mutableStateOf(false) }
             Card { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("📋 AI 주간 프로그램", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     if (programLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 }
+                // 횟수 추천 + 드롭다운으로 변경
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("최근 훈련량 기준 AI 추천: ${recommended}회/주", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                    Box {
+                        OutlinedButton(onClick = { countMenuOpen = true }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text("주 ${sessionCount}회 ▾")
+                        }
+                        DropdownMenu(countMenuOpen, { countMenuOpen = false }) {
+                            (2..6).forEach { n ->
+                                DropdownMenuItem(
+                                    text = { Text("주 ${n}회" + if (n == recommended) "  (추천)" else "") },
+                                    onClick = { sessionCount = n; countMenuOpen = false }
+                                )
+                            }
+                        }
+                    }
+                }
                 if (program.isEmpty() && !programLoading)
-                    Text("최근 기록을 바탕으로 이번 주 훈련 3회를 만들어줄게.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("최근 기록을 바탕으로 이번 주 훈련 ${sessionCount}회를 만들어줄게.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 program.forEach { s ->
                     Column(Modifier.padding(top = 4.dp)) {
                         Text("• ${s.title}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -403,9 +452,10 @@ fun MainScreen(
                     }
                 }
                 programErr?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                if (programLoading) ElapsedProgressBar(expectedSec = 15, label = "AI가 주 ${sessionCount}회 프로그램 설계 중")
                 Button(onClick = {
                     programLoading = true; programErr = null
-                    generateProgram { r ->
+                    generateProgram(sessionCount) { r ->
                         programLoading = false
                         r.onSuccess {
                             val parsed = ProgramParser.parse(it)
@@ -418,6 +468,7 @@ fun MainScreen(
             } }
         }
 
+        BestRecordsCard(state.workouts)
         StatsCard(state.workouts)
 
         if (state.loading) {
@@ -499,10 +550,8 @@ fun MainScreen(
             title = { Text("📋 오늘 종합 코칭") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (dailyLoading) Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp)); Text("코치가 종합 분석 중...")
-                    } else Text(dailyText ?: "", fontSize = 14.sp)
+                    if (dailyLoading) ElapsedProgressBar(expectedSec = 12, label = "코치가 종합 분석 중")
+                    else Text(dailyText ?: "", fontSize = 14.sp)
                 }
             }
         )
@@ -700,15 +749,21 @@ private fun WorkoutDetail(
         Text("${timeFmt.format(w.start)} ~ ${timeFmt.format(w.end)}",
             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // 통계
+        // 통계 — 헬스커넥트가 주는 값은 기본적으로 다 표시
         val stats = buildList {
             if (w.type.distanceBased && w.distanceMeters > 0) add("거리" to "%.2f km".format(w.distanceKm))
             add("시간" to formatDuration(w.durationSec))
             if (w.type.distanceBased && w.distanceMeters > 0) add("평균 페이스" to formatPace(w.avgPaceSecPerKm))
+            if (w.maxSpeedMps != null && w.maxSpeedMps > 0) {
+                add("최고 속도" to "%.1f km/h".format(w.maxSpeedMps * 3.6))
+            }
             if (w.avgHr != null) add("평균 심박" to "${w.avgHr} bpm")
             if (w.maxHr != null) add("최고 심박" to "${w.maxHr} bpm")
             if (w.calories != null) add("칼로리" to "%.0f kcal".format(w.calories))
-            if (w.elevationGainM != null) add("고도" to "%.0f m".format(w.elevationGainM))
+            if (w.steps != null && w.steps > 0) add("걸음 수" to "%,d 걸음".format(w.steps))
+            if (w.elevationGainM != null) add("누적 고도" to "%.0f m".format(w.elevationGainM))
+            if (w.elevationGainM != null && w.distanceMeters > 0)
+                add("평균 경사도" to "%.1f%%".format(w.elevationGainM / w.distanceMeters * 100))
         }
         stats.chunked(2).forEach { rowStats ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -727,11 +782,19 @@ private fun WorkoutDetail(
                 Spacer(Modifier.width(8.dp)); Text("구간 페이스 계산 중...", fontSize = 12.sp)
             }
         } else if (splits.isNotEmpty()) {
-            Card { Column(Modifier.padding(12.dp)) {
-                Text("구간별 페이스", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                splits.forEach {
+            var splitsExpanded by remember(w.id) { mutableStateOf(false) }
+            val previewCount = 4
+            val shown = if (splitsExpanded) splits else splits.take(previewCount)
+            Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("구간별 페이스 (${splits.size}구간)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                shown.forEach {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(it.label); Text(formatPace(it.paceSecPerKm) + (it.avgHr?.let { h -> " · ${h}bpm" } ?: ""))
+                    }
+                }
+                if (splits.size > previewCount) {
+                    TextButton(onClick = { splitsExpanded = !splitsExpanded }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (splitsExpanded) "접기 ▲" else "전체 ${splits.size}구간 펼치기 ▼")
                     }
                 }
             } }
@@ -762,9 +825,9 @@ private fun WorkoutDetail(
                 }
             }
         }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
-            if (loading) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("코치가 분석 중...") }
-            else Text(if (coaching != null) "🔄 다시 코칭 받기" else "💪 코칭 받기")
+            Text(if (loading) "코치가 분석 중..." else if (coaching != null) "🔄 다시 코칭 받기" else "💪 코칭 받기")
         }
+        if (loading) ElapsedProgressBar(expectedSec = 12, label = "코치가 분석 중")
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Text(
             "오늘 AI 코칭 ${store.usageToday()}회 사용 · 무료(Gemini)는 분당·일일 한도가 있어요",
@@ -836,16 +899,71 @@ private fun SettingsDialog(store: CoachStore, onClose: () -> Unit) {
                 )
                 HorizontalDivider()
                 Text("🏃 내 프로필 (코칭에 항상 참고돼요)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                val maxLen = 1000
+                val recommendLen = 300
                 OutlinedTextField(
-                    profile, { profile = it },
+                    profile, { if (it.length <= maxLen) profile = it },
                     label = { Text("목표·부상·선호 등") },
                     placeholder = { Text("예) 무릎 약함, 주 3회, 하프 준비 중") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
+                    isError = profile.length > recommendLen,
+                    supportingText = {
+                        Text(
+                            "${profile.length}/$maxLen 자" +
+                                if (profile.length > recommendLen) " · 권장 ${recommendLen}자 이내 (길면 코칭이 산만해져요)" else " · 권장 ${recommendLen}자 이내",
+                            fontSize = 11.sp,
+                            color = if (profile.length > recommendLen) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                 )
             }
         }
     )
+}
+
+/** 진짜 %를 모르는 작업(AI 호출 등)용 — 경과시간 기준으로 차오르는 진행 바.
+ *  expectedSec를 기준으로 95%까지 차고, 응답이 오면 호출부에서 사라진다. */
+@Composable
+private fun ElapsedProgressBar(expectedSec: Int, label: String) {
+    var elapsed by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
+    val frac = (elapsed.toFloat() / expectedSec).coerceIn(0.03f, 0.95f)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("$label… ⏱️ ${elapsed}초", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        @Suppress("DEPRECATION")
+        LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** 5km·10km 베스트 기록 카드 — 자기 기록 경신 동기부여 */
+@Composable
+private fun BestRecordsCard(workouts: List<WorkoutRecord>) {
+    val runs = workouts.filter { it.type == ExerciseType.RUNNING && it.distanceMeters > 0 }
+    if (runs.isEmpty()) return
+    val level = computeRunningLevel(runs)
+    val best5k = level.best5kSec
+    val best10k = level.best10kSec
+    // 단일 러닝 최고(최단) 평균 페이스 (3km 이상만, 워밍업 짧은 기록 제외)
+    val bestPace = runs.filter { it.distanceKm >= 3.0 }.map { it.avgPaceSecPerKm }.filter { it > 0 }.minOrNull()
+    if (best5k == null && best10k == null && bestPace == null) return
+    Card { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("🏅 베스트 기록", fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BestItem("5km 최고", best5k?.let { formatDuration(it.toLong()) } ?: "—", Modifier.weight(1f))
+            BestItem("10km 최고", best10k?.let { formatDuration(it.toLong()) } ?: "—", Modifier.weight(1f))
+            BestItem("최고 평균 페이스", bestPace?.let { formatPace(it) } ?: "—", Modifier.weight(1f))
+        }
+        Text("👟 기록을 깨러 가볼까? 다음 러닝에서 도전!", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+    } }
+}
+
+@Composable
+private fun BestItem(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
 }
 
 @Composable

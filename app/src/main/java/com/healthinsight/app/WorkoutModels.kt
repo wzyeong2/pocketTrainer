@@ -58,6 +58,7 @@ data class WorkoutRecord(
     val calories: Double?,
     val elevationGainM: Double?,
     val steps: Long?,
+    val maxSpeedMps: Double?,   // 최고 속도 (m/s)
     val splits: List<Split>,
     val source: String = "",   // 데이터 출처 (앱·기기)
     val fromWatch: Boolean = false,  // 워치에서 기록됐는지
