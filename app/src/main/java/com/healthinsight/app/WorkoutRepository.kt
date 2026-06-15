@@ -118,6 +118,8 @@ class WorkoutRepository(private val context: Context) {
 
     private suspend fun toRecord(session: ExerciseSessionRecord, type: ExerciseType): WorkoutRecord {
         val filter = TimeRangeFilter.between(session.startTime, session.endTime)
+        // 총 경과시간(출발~도착). 삼성헬스의 '활동시간'(일시정지 제외)은 Health Connect로
+        // 일관되게 넘어오지 않아 재현 불가 → 일관성을 위해 총 경과시간 사용.
         val durationSec = Duration.between(session.startTime, session.endTime).seconds
 
         // 목록/캘린더용 가벼운 집계 (무거운 구간 페이스는 상세 열 때 따로 계산)
@@ -166,7 +168,7 @@ class WorkoutRepository(private val context: Context) {
     suspend fun splitsFor(w: WorkoutRecord): List<Split> {
         if (w.type != ExerciseType.RUNNING) return emptyList()
         val filter = TimeRangeFilter.between(w.start, w.end)
-        return computeSplits(filter, readHrSamples(filter))
+        return computeSplits(filter, readHrSamples(filter), w.distanceMeters)
     }
 
     /** 데이터 출처(앱·기기) 사람이 읽는 라벨 */
@@ -201,6 +203,7 @@ class WorkoutRepository(private val context: Context) {
     private suspend fun computeSplits(
         filter: TimeRangeFilter,
         hrSamples: List<Pair<Instant, Int>>,
+        totalDistanceMeters: Double,
     ): List<Split> {
         val samples = try {
             client.readRecords(ReadRecordsRequest(SpeedRecord::class, filter, pageSize = 5000))
@@ -211,6 +214,16 @@ class WorkoutRepository(private val context: Context) {
         val t0 = samples.first().time
         fun secOf(t: Instant) = Duration.between(t0, t).toMillis() / 1000.0
         fun instantAt(sec: Double) = t0.plusMillis((sec * 1000).toLong())
+
+        // 1차: 속도 적분 총거리 → 실제 총거리에 맞춰 보정(스케일)
+        var rawTotal = 0.0
+        for (i in 1 until samples.size) {
+            val dt = secOf(samples[i].time) - secOf(samples[i - 1].time)
+            if (dt <= 0) continue
+            val v = (samples[i - 1].speed.inMetersPerSecond + samples[i].speed.inMetersPerSecond) / 2.0
+            if (v > 0) rawTotal += v * dt
+        }
+        val scale = if (rawTotal > 0 && totalDistanceMeters > 0) totalDistanceMeters / rawTotal else 1.0
 
         val segMeters = 500.0 // 0.5km 구간
         val splits = mutableListOf<Split>()
@@ -223,7 +236,7 @@ class WorkoutRepository(private val context: Context) {
             val dt = cSec - pSec
             if (dt <= 0) continue
             val v = (prev.speed.inMetersPerSecond + cur.speed.inMetersPerSecond) / 2.0
-            val stepDist = v * dt
+            val stepDist = v * dt * scale
             if (stepDist <= 0) continue
             val prevCum = cum
             cum += stepDist
@@ -239,6 +252,16 @@ class WorkoutRepository(private val context: Context) {
                 segStartSec = tBoundary
                 idx++
             }
+        }
+        // 마지막 자투리 구간(예: 9.5km 이후 남은 0.5km)도 표시
+        val lastBoundary = (idx - 1) * segMeters
+        val leftover = cum - lastBoundary
+        val lastSec = secOf(samples.last().time)
+        if (leftover >= 50.0 && lastSec > segStartSec) {
+            val segSec = lastSec - segStartSec
+            val paceSecPerKm = (segSec / (leftover / 1000.0)).toInt()
+            val hr = avgHrBetween(hrSamples, instantAt(segStartSec), instantAt(lastSec))
+            if (paceSecPerKm in 120..1200) splits.add(Split(cum / 1000.0, paceSecPerKm, hr))
         }
         return splits
     }

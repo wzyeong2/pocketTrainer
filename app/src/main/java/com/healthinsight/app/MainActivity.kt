@@ -35,7 +35,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -1100,8 +1102,14 @@ private fun SplashScreen(onDone: () -> Unit) {
                 scaleX = s; scaleY = s
             }
         ) {
-            Text("🌳", fontSize = 64.sp)
-            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier.size(168.dp).clip(CircleShape).background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(painterResource(R.drawable.mascot), "포켓 트레이너 마스코트",
+                    Modifier.size(158.dp), contentScale = ContentScale.Fit)
+            }
+            Spacer(Modifier.height(16.dp))
             Text("포켓 트레이너", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text("내 주머니 속 AI 운동 코치", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
         }
@@ -1128,8 +1136,13 @@ private fun CelebrationOverlay(message: String, onDone: () -> Unit) {
         ) {
             Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🎉", fontSize = 52.sp)
-                Text("신기록 달성!", fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                Box(
+                    Modifier.size(108.dp).clip(CircleShape).background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(painterResource(R.drawable.mascot), null, Modifier.size(102.dp), contentScale = ContentScale.Fit)
+                }
+                Text("🎉 신기록 달성!", fontWeight = FontWeight.Bold, fontSize = 22.sp)
                 Text(message.removePrefix("🎉 "), fontSize = 15.sp, textAlign = TextAlign.Center)
                 Text("탭해서 닫기", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
