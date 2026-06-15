@@ -32,6 +32,8 @@ fun LiveRunningScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var partyShown by remember { mutableStateOf(false) }
+    LaunchedEffect(LiveCoach.phase) { if (LiveCoach.phase != "finished") partyShown = false }
 
     var targetText by remember { mutableStateOf("5:30") }
     var distText by remember { mutableStateOf("5") }
@@ -43,6 +45,7 @@ fun LiveRunningScreen(
     var summaryCoach by remember { mutableStateOf<String?>(null) }
     var coachLoading by remember { mutableStateOf(false) }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -107,6 +110,10 @@ fun LiveRunningScreen(
                     if (LiveCoach.mode == "gps" && !hasLocationPermission) { onRequestLocation(); return@SetupView }
                     LiveCoachService.start(context)
                 })
+        }
+    }
+        if (LiveCoach.phase == "finished" && !partyShown) {
+            ConfettiOverlay { partyShown = true }
         }
     }
 }

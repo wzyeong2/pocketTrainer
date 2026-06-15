@@ -86,6 +86,14 @@ class CoachStore(context: Context) {
         get() = prefs.getString("last_seen_date", "") ?: ""
         set(v) = prefs.edit().putString("last_seen_date", v).apply()
 
+    /** 알고 있는 최고 기록(초) — 갱신 감지해서 빵빠레 띄우기용. 0=아직 없음 */
+    var bestKnown5kSec: Int
+        get() = prefs.getInt("best_known_5k", 0)
+        set(v) = prefs.edit().putInt("best_known_5k", v).apply()
+    var bestKnown10kSec: Int
+        get() = prefs.getInt("best_known_10k", 0)
+        set(v) = prefs.edit().putInt("best_known_10k", v).apply()
+
     // ----- 숨긴 운동 (중복/원치 않는 기록을 앱에서 안 보이게) -----
     fun hiddenIds(): Set<Long> =
         (prefs.getStringSet("hidden", emptySet()) ?: emptySet()).mapNotNull { it.toLongOrNull() }.toSet()

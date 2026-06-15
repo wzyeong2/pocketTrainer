@@ -54,6 +54,30 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 
+/** 에너제틱/스포티 다크 테마 — 비비드 청록 + 주황 포인트 */
+private val EnergeticDark = darkColorScheme(
+    primary = Color(0xFF2BD4B0),            // 비비드 청록
+    onPrimary = Color(0xFF00332A),
+    primaryContainer = Color(0xFF0E5247),   // 청록 카드 배경
+    onPrimaryContainer = Color(0xFFB6FFEC),
+    secondary = Color(0xFFFF8A3D),          // 에너지 주황 포인트
+    onSecondary = Color(0xFF3A1500),
+    secondaryContainer = Color(0xFF6B3410),
+    onSecondaryContainer = Color(0xFFFFDCC4),
+    tertiary = Color(0xFFFFC24B),           // 골드(기록/달성)
+    onTertiary = Color(0xFF3A2A00),
+    background = Color(0xFF0E1513),
+    onBackground = Color(0xFFE6EEEB),
+    surface = Color(0xFF141D1A),            // 카드 기본
+    onSurface = Color(0xFFE6EEEB),
+    surfaceVariant = Color(0xFF263330),
+    onSurfaceVariant = Color(0xFFAFC0BB),
+    error = Color(0xFFFF6B6B),
+    errorContainer = Color(0xFF5C1A1A),
+    onErrorContainer = Color(0xFFFFD9D6),
+    outline = Color(0xFF3A4A46),
+)
+
 private val TYPE_COLORS = mapOf(
     ExerciseType.RUNNING to Color(0xFF3DA58A),
     ExerciseType.STRENGTH to Color(0xFFE0A23B),
@@ -117,7 +141,7 @@ class MainActivity : ComponentActivity() {
         checkStatus()
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF3DA58A))) {
+            MaterialTheme(colorScheme = EnergeticDark) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Box(Modifier.fillMaxSize()) {
                         when {
@@ -151,6 +175,10 @@ class MainActivity : ComponentActivity() {
                                 dailyCoach = ::dailyCoach,
                                 generateProgram = ::generateProgram,
                             )
+                        }
+                        // 기록 경신 빵빠레 (축포 + 축하 배너)
+                        ui.value.celebrate?.let { msg ->
+                            CelebrationOverlay(msg) { ui.value = ui.value.copy(celebrate = null) }
                         }
                         if (showSplash.value) SplashScreen { showSplash.value = false }
                     }
@@ -197,7 +225,8 @@ class MainActivity : ComponentActivity() {
                 val ws = repo.allWorkouts(120)
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
-                ui.value = ui.value.copy(loading = false, workouts = ws, firstVisitToday = false,
+                val party = checkPersonalBest(ws)
+                ui.value = ui.value.copy(loading = false, workouts = ws, firstVisitToday = false, celebrate = party,
                     message = if (ws.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
             } catch (e: Exception) {
                 ui.value = ui.value.copy(loading = false, message = "데이터를 읽지 못했어요: ${e.message}")
@@ -277,6 +306,24 @@ class MainActivity : ComponentActivity() {
         if (store.lastProgramResult.isNotBlank()) sb.appendLine("- 지난 프로그램 세션 결과: ${store.lastProgramResult}")
         return sb.toString()
     }
+
+    /** 새로 불러온 기록에서 5k·10k 최고기록 경신을 감지 → 빵빠레 메시지(없으면 null) */
+    private fun checkPersonalBest(ws: List<WorkoutRecord>): String? {
+        val level = computeRunningLevel(ws.filter { it.type == ExerciseType.RUNNING })
+        val msgs = mutableListOf<String>()
+        level.best5kSec?.let { cur ->
+            val prev = store.bestKnown5kSec
+            if (prev in 1 until cur) {} // 더 느림 — 무시
+            if (prev == 0) store.bestKnown5kSec = cur
+            else if (cur < prev) { store.bestKnown5kSec = cur; msgs.add("5km 최고기록 경신! ${formatDuration(cur.toLong())}") }
+        }
+        level.best10kSec?.let { cur ->
+            val prev = store.bestKnown10kSec
+            if (prev == 0) store.bestKnown10kSec = cur
+            else if (cur < prev) { store.bestKnown10kSec = cur; msgs.add("10km 최고기록 경신! ${formatDuration(cur.toLong())}") }
+        }
+        return if (msgs.isEmpty()) null else "🎉 " + msgs.joinToString(" · ")
+    }
 }
 
 data class UiState(
@@ -286,6 +333,7 @@ data class UiState(
     val workouts: List<WorkoutRecord> = emptyList(),
     val message: String? = null,
     val firstVisitToday: Boolean = false,   // 오늘 첫 방문 → 새 기록 불러오기 안내
+    val celebrate: String? = null,          // 기록 경신 시 빵빠레 메시지
 )
 
 private fun jpegBytes(bmp: Bitmap): ByteArray {
@@ -1043,7 +1091,7 @@ private fun ConsentScreen(onAccept: () -> Unit) {
 private fun SplashScreen(onDone: () -> Unit) {
     val anim = remember { Animatable(0f) }
     LaunchedEffect(Unit) { anim.animateTo(1f, tween(700)); delay(900); onDone() }
-    Box(Modifier.fillMaxSize().background(Color(0xFF2E7D6B)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF0E5247)), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.graphicsLayer {
@@ -1056,6 +1104,35 @@ private fun SplashScreen(onDone: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             Text("포켓 트레이너", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text("내 주머니 속 AI 운동 코치", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+        }
+    }
+}
+
+/** 기록 경신 축하: 축포(빵빠레) + 가운데 축하 배너. 탭하면 닫힘. */
+@Composable
+private fun CelebrationOverlay(message: String, onDone: () -> Unit) {
+    var show by remember { mutableStateOf(true) }
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { pop.animateTo(1f, tween(450)) }
+    Box(
+        Modifier.fillMaxSize().clickableNoRipple { show = false; onDone() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (show) ConfettiOverlay { show = false; onDone() }
+        Card(
+            Modifier.padding(28.dp).graphicsLayer {
+                val s = 0.6f + 0.4f * pop.value; scaleX = s; scaleY = s; alpha = pop.value
+            },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            shape = RoundedCornerShape(20.dp),
+        ) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🎉", fontSize = 52.sp)
+                Text("신기록 달성!", fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                Text(message.removePrefix("🎉 "), fontSize = 15.sp, textAlign = TextAlign.Center)
+                Text("탭해서 닫기", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
