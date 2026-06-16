@@ -113,6 +113,20 @@ fun computeRunningLevel(runs: List<WorkoutRecord>): LevelStatus {
     return LevelStatus(current, lv3, best5k, best10k)
 }
 
+/** 코스 난이도 — 거리당 상승고도(m/km)로 평지~가파름 등급 */
+data class CourseDifficulty(val label: String, val emoji: String, val climbPerKm: Int)
+
+fun courseDifficulty(elevationGainM: Double?, distanceMeters: Double): CourseDifficulty? {
+    if (elevationGainM == null || elevationGainM < 0 || distanceMeters < 500) return null
+    val perKm = (elevationGainM / (distanceMeters / 1000.0)).toInt()
+    return when {
+        perKm < 5 -> CourseDifficulty("평지", "🟢", perKm)
+        perKm < 15 -> CourseDifficulty("완만", "🟡", perKm)
+        perKm < 30 -> CourseDifficulty("언덕", "🟠", perKm)
+        else -> CourseDifficulty("가파름", "🔴", perKm)
+    }
+}
+
 fun formatPace(secPerKm: Int): String {
     if (secPerKm <= 0) return "-"
     return "%d:%02d/km".format(secPerKm / 60, secPerKm % 60)

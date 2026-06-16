@@ -845,7 +845,9 @@ private fun WorkoutItem(w: WorkoutRecord, coached: Boolean, onClick: () -> Unit)
             Column(horizontalAlignment = Alignment.End) {
                 if (w.type.distanceBased && w.distanceMeters > 0) {
                     Text("%.2fkm".format(w.distanceKm), fontWeight = FontWeight.Bold)
-                    Text(formatPace(w.avgPaceSecPerKm), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val diff = courseDifficulty(w.elevationGainM, w.distanceMeters)
+                    Text(formatPace(w.avgPaceSecPerKm) + (diff?.let { " ${it.emoji}" } ?: ""),
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Text(formatDuration(w.durationSec), fontWeight = FontWeight.Bold)
                     Text("근력", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -905,6 +907,9 @@ private fun WorkoutDetail(
             if (w.elevationGainM != null) add("누적 고도" to "%.0f m".format(w.elevationGainM))
             if (w.elevationGainM != null && w.distanceMeters > 0)
                 add("평균 경사도" to "%.1f%%".format(w.elevationGainM / w.distanceMeters * 100))
+            courseDifficulty(w.elevationGainM, w.distanceMeters)?.let {
+                add("코스 난이도" to "${it.emoji} ${it.label}")
+            }
         }
         stats.chunked(2).forEach { rowStats ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -172,6 +172,9 @@ object CoachPrompt {
         if (e != null) {
             appendLine("• 고도 상승: ${"%.0f".format(e)}m")
             if (w.distanceMeters > 0) appendLine("• 평균 경사도: ${"%.1f".format(e / w.distanceMeters * 100)}%")
+            courseDifficulty(e, w.distanceMeters)?.let {
+                appendLine("• 코스 난이도: ${it.label} (km당 +${it.climbPerKm}m 상승) — 페이스 평가 시 이 오르막 부하를 GAP로 감안할 것")
+            }
         }
         if (w.splits.isNotEmpty()) {
             append("• 구간별 페이스: ")
