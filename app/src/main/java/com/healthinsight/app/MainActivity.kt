@@ -179,6 +179,7 @@ class MainActivity : ComponentActivity() {
                                 coachWorkout = ::coachWorkout,
                                 loadSplits = ::loadSplits,
                                 dailyCoach = ::dailyCoach,
+                                monthlyCoach = ::monthlyCoach,
                                 generateProgram = ::generateProgram,
                             )
                         }
@@ -231,6 +232,7 @@ class MainActivity : ComponentActivity() {
     private fun loadAll() {
         lifecycleScope.launch {
             ui.value = ui.value.copy(loading = true, message = null, firstVisitToday = false)
+            Toast.makeText(this@MainActivity, "최신 기록 불러오는 중...", Toast.LENGTH_SHORT).show()
             try {
                 val ws = repo.allWorkouts(120)
                 store.workoutsCache = WorkoutCache.toJson(ws)
@@ -239,6 +241,8 @@ class MainActivity : ComponentActivity() {
                 val party = checkPersonalBest(merged)
                 ui.value = ui.value.copy(loading = false, workouts = merged, firstVisitToday = false, celebrate = party,
                     message = if (merged.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
+                Toast.makeText(this@MainActivity,
+                    if (merged.isEmpty()) "기록이 없어요" else "✅ ${merged.size}개 불러왔어요", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 ui.value = ui.value.copy(loading = false, message = "데이터를 읽지 못했어요: ${e.message}")
                 Toast.makeText(this@MainActivity, "데이터를 읽지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
@@ -279,6 +283,32 @@ class MainActivity : ComponentActivity() {
             sb.append("[오늘 한 운동들]\n")
             workouts.sortedBy { it.start }.forEach { sb.append("• ").append(CoachPrompt.summarize(it).replace("\n", " ").trim()).append("\n") }
             sb.append("\n위 [내 프로필]을 참고해서 아래 형식으로 (제목 유지):\n### 1. 오늘 전체 평가\n### 2. 운동 조합/균형 피드백\n### 3. 내일 추천\n핵심만, 너무 길지 않게.")
+            val r = AiCoach.generate(provider, key, sb.toString(), null)
+            onResult(r)
+        }
+    }
+
+    /** 한 달 코칭: 해당 월 운동 전체를 묶어 훈련량·추세 분석 */
+    private fun monthlyCoach(workouts: List<WorkoutRecord>, label: String, onResult: (Result<String>) -> Unit) {
+        val provider = store.provider
+        val key = store.keyFor(provider)
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        store.recordAiCall()
+        lifecycleScope.launch {
+            val runs = workouts.filter { it.type == ExerciseType.RUNNING }
+            val sb = StringBuilder("너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n\n")
+            sb.append(athleteContext()).append("\n")
+            sb.append("[$label 훈련 요약]\n")
+            sb.append("- 총 운동 ${workouts.size}회 (러닝 ${runs.size}회)\n")
+            sb.append("- 러닝 총거리 ${"%.1f".format(runs.sumOf { it.distanceKm })}km\n")
+            val paces = runs.map { it.avgPaceSecPerKm }.filter { it > 0 }
+            if (paces.isNotEmpty()) sb.append("- 러닝 평균 페이스 ${formatPace(paces.average().toInt())}\n")
+            sb.append("\n[운동 목록]\n")
+            workouts.sortedBy { it.start }.take(40).forEach {
+                sb.append("• ").append(CoachPrompt.summarize(it).replace("\n", " ").trim()).append("\n")
+            }
+            sb.append("\n위 한 달치 훈련을 보고 아래 형식으로 (제목 유지):\n")
+            sb.append("### 1. 이번 달 총평\n### 2. 훈련량·빈도·페이스 추세\n### 3. 다음 달 목표·처방\n핵심만, 너무 길지 않게.")
             val r = AiCoach.generate(provider, key, sb.toString(), null)
             onResult(r)
         }
@@ -379,12 +409,16 @@ fun MainScreen(
     coachWorkout: (WorkoutRecord, String, (Result<String>) -> Unit) -> Unit,
     loadSplits: (WorkoutRecord, (List<Split>) -> Unit) -> Unit,
     dailyCoach: (List<WorkoutRecord>, (Result<String>) -> Unit) -> Unit,
+    monthlyCoach: (List<WorkoutRecord>, String, (Result<String>) -> Unit) -> Unit,
     generateProgram: (Int, (Result<String>) -> Unit) -> Unit,
 ) {
     var filter by remember { mutableStateOf<ExerciseType?>(null) }
     var dailyDialog by remember { mutableStateOf(false) }
     var dailyText by remember { mutableStateOf<String?>(null) }
     var dailyLoading by remember { mutableStateOf(false) }
+    var monthDialog by remember { mutableStateOf(false) }
+    var monthText by remember { mutableStateOf<String?>(null) }
+    var monthLoading by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var program by remember { mutableStateOf(ProgramParser.parse(store.programJson)) }
@@ -465,6 +499,21 @@ fun MainScreen(
             onNext = { month = month.plusMonths(1) },
             onSelect = { selectedDate = if (selectedDate == it) null else it })
 
+        // 이번(보고 있는) 달 종합 코칭
+        val monthWorkouts = visible.filter {
+            val d = it.id.toLocalDate(); d.year == month.year && d.monthValue == month.monthValue
+        }
+        if (monthWorkouts.isNotEmpty()) {
+            FilledTonalButton(onClick = {
+                monthDialog = true; monthLoading = true; monthText = null
+                monthlyCoach(monthWorkouts, "${month.year}년 ${month.monthValue}월") { r ->
+                    monthLoading = false; monthText = r.fold({ it }, { "실패: ${it.message}" })
+                }
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("📅 ${month.monthValue}월 코칭 받기 (${monthWorkouts.size}개 운동)")
+            }
+        }
+
         // AI 주간 프로그램 (기록 5개 이상)
         val runCount = state.workouts.count { it.type == ExerciseType.RUNNING }
         if (runCount >= 5) {
@@ -543,12 +592,18 @@ fun MainScreen(
             }
         }
 
-        // 리스트
-        val listWorkouts = (if (selectedDate != null) byDate[selectedDate].orEmpty() else filtered)
+        // 리스트 — 날짜 미선택이면 최근 N개만 (전부 쏟아지지 않게)
+        val defaultLimit = 15
+        val allInScope = (if (selectedDate != null) byDate[selectedDate].orEmpty() else filtered)
             .sortedByDescending { it.id }
+        val listWorkouts = if (selectedDate == null) allInScope.take(defaultLimit) else allInScope
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(selectedDate?.let { dateFmt.format(it) } ?: "최근 운동", fontWeight = FontWeight.Bold)
             if (selectedDate != null) TextButton({ selectedDate = null }) { Text("전체 보기 ✕") }
+        }
+        if (selectedDate == null && allInScope.size > listWorkouts.size) {
+            Text("최근 ${listWorkouts.size}개 표시 · 전체 ${allInScope.size}개 — 위 달력에서 날짜를 누르면 그 날 기록만 봐요.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (dayWorkouts.size >= 2) {
             FilledTonalButton(onClick = {
@@ -621,7 +676,21 @@ fun MainScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     if (dailyLoading) ElapsedProgressBar(expectedSec = 12, label = "코치가 종합 분석 중")
-                    else Text(dailyText ?: "", fontSize = 14.sp)
+                    else MarkdownText(dailyText ?: "", baseSize = 14.sp)
+                }
+            }
+        )
+    }
+
+    if (monthDialog) {
+        AlertDialog(
+            onDismissRequest = { monthDialog = false },
+            confirmButton = { TextButton({ monthDialog = false }) { Text("닫기") } },
+            title = { Text("📅 이번 달 코칭") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (monthLoading) ElapsedProgressBar(expectedSec = 14, label = "코치가 한 달 분석 중")
+                    else MarkdownText(monthText ?: "", baseSize = 14.sp)
                 }
             }
         )
@@ -907,7 +976,7 @@ private fun WorkoutDetail(
         )
         coaching?.let {
             HorizontalDivider()
-            Text(it, fontSize = 15.sp)
+            MarkdownText(it, baseSize = 15.sp)
         }
 
         HorizontalDivider()
