@@ -8,6 +8,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -61,6 +65,11 @@ object LiveCoach {
     // 프로그램 모드: 처방된 세션을 라이브로 재생
     var programSegments by mutableStateOf<List<ProgramSegment>>(emptyList())
     var programTitle by mutableStateOf("")
+
+    // 실시간 고도·경사 (폰 기압계)
+    var hasBaro by mutableStateOf(false)
+    var gradePct by mutableStateOf(0)      // 현재 경사도 %
+    var elevGainM by mutableStateOf(0.0)   // 누적 상승고도 m
 }
 
 /**
@@ -83,6 +92,15 @@ class LiveCoachService : Service() {
     private var hrOver = false          // 현재 심박이 목표 초과 알림 상태인지
     private var lastHrAlertMs = 0L      // 마지막 심박 초과 알림 시각 (리트라이 쿨다운용)
     private val hrRealertMs = 120_000L  // 초과 지속 시 2분마다 재알림
+
+    // 기압계 고도/경사
+    private var sensorMgr: SensorManager? = null
+    private var baroListener: SensorEventListener? = null
+    private var curAlt = 0.0            // 스무딩된 현재 고도(m)
+    private var altInit = false
+    private var altRef = 0.0            // 누적 상승고도 계산용 기준점
+    private val gradeWindow = ArrayDeque<Pair<Double, Double>>()  // (수평거리m, 고도m)
+    private var lastGradeCueMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -107,12 +125,14 @@ class LiveCoachService : Service() {
         lastCueMs = 0L; kmSplitSec = 0.0; lastLoc = null; window.clear()
         goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
         hrOver = false; lastHrAlertMs = 0L
+        altInit = false; curAlt = 0.0; altRef = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
+        LiveCoach.hasBaro = false; LiveCoach.gradePct = 0; LiveCoach.elevGainM = 0.0
         speak("자, 출발! 목표 페이스 ${mmss(LiveCoach.targetPace)} 맞춰서 가보자!")
 
-        if (LiveCoach.mode == "gps") startGps()
+        if (LiveCoach.mode == "gps") { startGps(); startBaro() }
 
         scope = CoroutineScope(Dispatchers.Main)
         scope!!.launch { while (isActive) { delay(1000); tick() } }
@@ -132,6 +152,27 @@ class LiveCoachService : Service() {
         }
         try { lm?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener!!) }
         catch (e: SecurityException) { LiveCoach.cue = "⚠️ 위치 권한 오류" }
+    }
+
+    /** 폰 기압계로 실시간 고도 추적 (EMA 스무딩) */
+    private fun startBaro() {
+        sensorMgr = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = sensorMgr?.getDefaultSensor(Sensor.TYPE_PRESSURE)
+        if (sensor == null) { LiveCoach.hasBaro = false; return }
+        LiveCoach.hasBaro = true
+        baroListener = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                val alt = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, e.values[0]).toDouble()
+                curAlt = if (!altInit) { altInit = true; altRef = alt; alt } else curAlt * 0.9 + alt * 0.1
+            }
+            override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+        }
+        sensorMgr?.registerListener(baroListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+    }
+
+    private fun stopBaro() {
+        baroListener?.let { sensorMgr?.unregisterListener(it) }
+        baroListener = null
     }
 
     private fun tick() {
@@ -156,8 +197,31 @@ class LiveCoachService : Service() {
             LiveCoach.cue = "✅ $base"; speak(base)
             if (LiveCoach.aiOn) aiCheer(km)
         }
+        handleAltitude(now)
         handleGoal(now)
         updateNotif()
+    }
+
+    /** 실시간 고도/경사 계산 + 오르막·내리막 코칭 (GPS 모드 + 기압계) */
+    private fun handleAltitude(now: Long) {
+        if (LiveCoach.mode != "gps" || !altInit) return
+        // 누적 상승고도 (히스테리시스로 기압 노이즈 억제)
+        if (curAlt >= altRef + 1.0) { LiveCoach.elevGainM += curAlt - altRef; altRef = curAlt }
+        else if (curAlt < altRef) altRef = curAlt
+        // 실시간 경사: 최근 약 40m 수평거리 구간의 고도차 / 거리
+        gradeWindow.addLast(LiveCoach.distM to curAlt)
+        while (gradeWindow.size >= 2 && LiveCoach.distM - gradeWindow.first().first > 40.0) gradeWindow.removeFirst()
+        val start = gradeWindow.first()
+        val dh = LiveCoach.distM - start.first
+        if (dh < 15.0) return  // 수평 이동이 충분치 않으면 경사 판단 보류
+        val grade = ((curAlt - start.second) / dh * 100).roundToInt().coerceIn(-40, 40)
+        LiveCoach.gradePct = grade
+        if (now - lastGradeCueMs > 45000) {
+            when {
+                grade >= 4 -> { lastGradeCueMs = now; val m = "${grade}퍼센트 오르막이야. 페이스 욕심내지 말고 심박 지켜"; LiveCoach.cue = "⛰️ $m"; speak(m) }
+                grade <= -4 -> { lastGradeCueMs = now; val m = "내리막이야. 보폭 짧게, 무릎 보호하면서 가자"; LiveCoach.cue = "🏞️ $m"; speak(m) }
+            }
+        }
     }
 
     private fun handleGoal(now: Long) {
@@ -324,6 +388,7 @@ class LiveCoachService : Service() {
 
     private fun finishRun() {
         listener?.let { lm?.removeUpdates(it) }; listener = null
+        stopBaro()
         scope?.cancel(); scope = null
         val km = LiveCoach.distM / 1000
         LiveCoach.avgPace = if (km > 0) (LiveCoach.elapsedSec / km).roundToInt() else 0
@@ -338,7 +403,8 @@ class LiveCoachService : Service() {
                         durationSec = LiveCoach.elapsedSec,
                         distanceMeters = LiveCoach.distM,
                         avgHr = BleHeart.bpm,
-                        maxHr = null, calories = null, elevationGainM = null,
+                        maxHr = null, calories = null,
+                        elevationGainM = LiveCoach.elevGainM.takeIf { it > 0 },
                         steps = null, maxSpeedMps = null,
                         splits = emptyList(),
                         source = "라이브 코치",
@@ -356,6 +422,7 @@ class LiveCoachService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         listener?.let { lm?.removeUpdates(it) }
+        stopBaro()
         scope?.cancel()
         tts?.stop(); tts?.shutdown()
     }

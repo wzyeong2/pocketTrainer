@@ -249,6 +249,21 @@ private fun RunningView(context: android.content.Context) {
             )
         }
     }
+    if (LiveCoach.mode == "gps" && LiveCoach.hasBaro) {
+        val g = LiveCoach.gradePct
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = if (g >= 4) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Text(
+                "${if (g >= 4) "⛰️ 오르막" else if (g <= -4) "🏞️ 내리막" else "🛣️ 평지"}  경사 ${g}%   ·   📈 +${"%.0f".format(LiveCoach.elevGainM)}m",
+                Modifier.padding(14.dp), fontWeight = FontWeight.Bold, fontSize = 16.sp
+            )
+        }
+    }
     if ((LiveCoach.goalType == "interval" || LiveCoach.goalType == "program") && LiveCoach.intervalLabel.isNotBlank()) {
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
             Text("${if (LiveCoach.goalType == "program") "📋" else "인터벌:"} ${LiveCoach.intervalLabel}", Modifier.padding(14.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
