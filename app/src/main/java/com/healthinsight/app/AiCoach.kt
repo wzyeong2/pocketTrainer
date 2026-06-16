@@ -31,6 +31,10 @@ object AiCoach {
                 val text = if (provider == "claude") callClaude(apiKey, prompt, imageJpeg)
                 else callGemini(apiKey, prompt, imageJpeg)
                 return@withContext Result.success(text.trim())
+            } catch (e: java.net.UnknownHostException) {
+                return@withContext Result.failure(RuntimeException("📡 인터넷에 연결되어 있지 않아요. 와이파이나 데이터를 켜고 다시 시도해줘."))
+            } catch (e: java.net.ConnectException) {
+                return@withContext Result.failure(RuntimeException("📡 인터넷 연결이 불안정해요. 연결 확인하고 다시 시도해줘."))
             } catch (e: java.io.IOException) {
                 lastError = e
                 delay(800L * (attempt + 1)) // 0.8s, 1.6s 후 재시도

@@ -158,7 +158,11 @@ class MainActivity : ComponentActivity() {
                                         requestBle.launch(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT))
                                     else hasBle.value = true
                                 },
-                                onClose = { screen.value = "main" },
+                                onClose = {
+                                    // 방금 저장된 라이브 기록이 바로 목록에 보이게 재병합
+                                    ui.value = ui.value.copy(workouts = withLive(ui.value.workouts))
+                                    screen.value = "main"
+                                },
                             )
                             else -> MainScreen(
                                 state = ui.value,
@@ -213,11 +217,15 @@ class MainActivity : ComponentActivity() {
         val firstToday = store.lastSeenDate != today
         store.lastSeenDate = today
         if (cached.isNotEmpty()) {
-            ui.value = ui.value.copy(workouts = cached, loading = false, firstVisitToday = firstToday)
+            ui.value = ui.value.copy(workouts = withLive(cached), loading = false, firstVisitToday = firstToday)
         } else {
             loadAll() // 캐시 없음 → 최초 1회 자동 로드
         }
     }
+
+    /** Health Connect 기록 + 라이브 코치 로컬 기록을 합쳐 최신순으로 (id 중복 제거) */
+    private fun withLive(hc: List<WorkoutRecord>): List<WorkoutRecord> =
+        (hc + store.liveRuns()).distinctBy { it.id }.sortedByDescending { it.start }
 
     /** Health Connect에서 새로 읽어 캐시 갱신 (수동 '새 기록 불러오기' 전용) */
     private fun loadAll() {
@@ -227,9 +235,10 @@ class MainActivity : ComponentActivity() {
                 val ws = repo.allWorkouts(120)
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
-                val party = checkPersonalBest(ws)
-                ui.value = ui.value.copy(loading = false, workouts = ws, firstVisitToday = false, celebrate = party,
-                    message = if (ws.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
+                val merged = withLive(ws)
+                val party = checkPersonalBest(merged)
+                ui.value = ui.value.copy(loading = false, workouts = merged, firstVisitToday = false, celebrate = party,
+                    message = if (merged.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
             } catch (e: Exception) {
                 ui.value = ui.value.copy(loading = false, message = "데이터를 읽지 못했어요: ${e.message}")
                 Toast.makeText(this@MainActivity, "데이터를 읽지 못했어요: ${e.message}", Toast.LENGTH_LONG).show()
@@ -406,6 +415,8 @@ fun MainScreen(
                 Text("포켓 트레이너", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = onRefresh, enabled = !state.loading,
+                    label = { Text(if (state.loading) "⏳" else "🔄") })
                 AssistChip(onClick = onLive, label = { Text("🔴 라이브") })
                 AssistChip(onClick = { settingsOpen = true }, label = { Text("⚙️") })
             }
@@ -757,7 +768,7 @@ private fun WorkoutItem(w: WorkoutRecord, coached: Boolean, onClick: () -> Unit)
             Text(w.type.emoji, fontSize = 26.sp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(w.type.label, fontWeight = FontWeight.Bold)
+                Text(w.type.label + if (w.source.contains("라이브")) "  🔴라이브" else "", fontWeight = FontWeight.Bold)
                 Text("${dateFmt.format(w.id.toLocalDate())} · ${timeFmt.format(w.start)}",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (coached) Text("✓ 코칭 받음", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
@@ -807,6 +818,8 @@ private fun WorkoutDetail(
         Text(dateFmt.format(w.id.toLocalDate()), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("${timeFmt.format(w.start)} ~ ${timeFmt.format(w.end)}",
             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (w.source.isNotBlank())
+            Text("📲 ${w.source}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         // 통계 — 헬스커넥트가 주는 값은 기본적으로 다 표시
         val stats = buildList {

@@ -80,6 +80,9 @@ class LiveCoachService : Service() {
     private var goalAnnounced = false
     private var lastIntervalPhase = ""
     private var lastProgSeg = -1
+    private var hrOver = false          // 현재 심박이 목표 초과 알림 상태인지
+    private var lastHrAlertMs = 0L      // 마지막 심박 초과 알림 시각 (리트라이 쿨다운용)
+    private val hrRealertMs = 120_000L  // 초과 지속 시 2분마다 재알림
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -103,6 +106,7 @@ class LiveCoachService : Service() {
         startTs = System.currentTimeMillis()
         lastCueMs = 0L; kmSplitSec = 0.0; lastLoc = null; window.clear()
         goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
+        hrOver = false; lastHrAlertMs = 0L
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -237,15 +241,26 @@ class LiveCoachService : Service() {
             if (now - lastCueMs > 20000) { lastCueMs = now; LiveCoach.cue = "⌚ 심박 센서 연결을 기다리는 중..." }
             return
         }
-        if (now - lastCueMs > 15000) {
-            lastCueMs = now
-            val t = LiveCoach.targetHr
-            val msg = when {
-                hr > t -> "심박 ${hr}, 목표 ${t} 넘었어. 속도 줄이고 호흡 골라"
-                hr < t - 10 -> "심박 ${hr}, 여유 있어. 살짝 올려도 돼"
-                else -> "심박 ${hr}, 목표존 잘 지키고 있어"
+        val t = LiveCoach.targetHr
+        if (hr > t) {
+            // 목표 초과: 처음 넘었거나(상태 전환) 마지막 알림 후 쿨다운(2분) 지났을 때만 알림
+            if (!hrOver || now - lastHrAlertMs >= hrRealertMs) {
+                hrOver = true; lastHrAlertMs = now
+                val msg = "심박 ${hr}, 목표 ${t} 넘었어. 속도 줄이고 호흡 골라"
+                LiveCoach.cue = "❤️ $msg"; speak(msg)
             }
-            LiveCoach.cue = "❤️ $msg"; speak(msg)
+        } else {
+            // 목표존으로 복귀: 직전에 초과 알림 상태였다면 안정화 안내 1회
+            if (hrOver) {
+                hrOver = false
+                val msg = "좋아, 심박 ${hr}으로 안정됐어"
+                LiveCoach.cue = "❤️ $msg"; speak(msg)
+            } else if (hr < t - 10 && now - lastCueMs > 120000) {
+                // 너무 여유로우면 가끔(2분 간격) 한 번 격려
+                lastCueMs = now
+                val msg = "심박 ${hr}, 여유 있어. 살짝 올려도 돼"
+                LiveCoach.cue = "❤️ $msg"; speak(msg)
+            }
         }
     }
 
@@ -312,6 +327,26 @@ class LiveCoachService : Service() {
         scope?.cancel(); scope = null
         val km = LiveCoach.distM / 1000
         LiveCoach.avgPace = if (km > 0) (LiveCoach.elapsedSec / km).roundToInt() else 0
+        // 실제 GPS 러닝이고 의미있는 거리·시간이면 로컬 기록으로 저장 (삼성헬스 자동기록처럼, 나중에 숨김 가능)
+        if (LiveCoach.mode == "gps" && LiveCoach.distM >= 100.0 && LiveCoach.elapsedSec >= 60) {
+            try {
+                CoachStore(this).addLiveRun(
+                    WorkoutRecord(
+                        type = ExerciseType.RUNNING,
+                        start = java.time.Instant.ofEpochMilli(startTs),
+                        end = java.time.Instant.ofEpochMilli(System.currentTimeMillis()),
+                        durationSec = LiveCoach.elapsedSec,
+                        distanceMeters = LiveCoach.distM,
+                        avgHr = BleHeart.bpm,
+                        maxHr = null, calories = null, elevationGainM = null,
+                        steps = null, maxSpeedMps = null,
+                        splits = emptyList(),
+                        source = "라이브 코치",
+                        fromWatch = false,
+                    )
+                )
+            } catch (_: Exception) {}
+        }
         speak("수고했어! ${"%.1f".format(km)}킬로미터 완주!")
         LiveCoach.phase = "finished"
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

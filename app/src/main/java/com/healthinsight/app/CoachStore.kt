@@ -81,6 +81,19 @@ class CoachStore(context: Context) {
         get() = prefs.getString("last_fetch_date", "") ?: ""
         set(v) = prefs.edit().putString("last_fetch_date", v).apply()
 
+    /** 라이브 코치로 직접 뛴 기록 (Health Connect와 별개로 로컬 저장, 사용자가 숨길 수 있음) */
+    var liveRunsJson: String
+        get() = prefs.getString("live_runs", "") ?: ""
+        set(v) = prefs.edit().putString("live_runs", v).apply()
+
+    fun liveRuns(): List<WorkoutRecord> = WorkoutCache.fromJson(liveRunsJson)
+
+    fun addLiveRun(rec: WorkoutRecord) {
+        val cur = WorkoutCache.fromJson(liveRunsJson).toMutableList()
+        cur.add(rec)
+        liveRunsJson = WorkoutCache.toJson(cur)
+    }
+
     /** 앱을 마지막으로 연 날짜 — '오늘 첫 방문' 안내용 (fetch 여부와 무관) */
     var lastSeenDate: String
         get() = prefs.getString("last_seen_date", "") ?: ""
