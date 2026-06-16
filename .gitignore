@@ -8,3 +8,6 @@
 .externalNativeBuild/
 .cxx/
 *.apk
+
+# 발표자료(로컬 전용)
+presentation/
