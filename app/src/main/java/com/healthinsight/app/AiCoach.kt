@@ -17,6 +17,16 @@ object AiCoach {
 
     private val GEMINI_MODELS = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite")
     private const val CLAUDE_MODEL = "claude-sonnet-4-6"
+    private const val OPENAI_MODEL = "gpt-4o-mini"
+
+    /** 지원 AI 제공사 — 여기에 한 줄 추가 + when 분기만 추가하면 새 제공사가 붙는다(확장성) */
+    data class Provider(val id: String, val label: String, val keyUrl: String)
+    val PROVIDERS = listOf(
+        Provider("gemini", "Gemini (무료)", "aistudio.google.com/apikey"),
+        Provider("openai", "OpenAI (GPT)", "platform.openai.com/api-keys"),
+        Provider("claude", "Claude", "console.anthropic.com"),
+    )
+    fun providerLabel(id: String): String = PROVIDERS.firstOrNull { it.id == id }?.label ?: id
 
     suspend fun generate(
         provider: String,
@@ -28,8 +38,11 @@ object AiCoach {
         // 네트워크 오류면 최대 3번까지 재시도 (연결 끊김 대비)
         repeat(3) { attempt ->
             try {
-                val text = if (provider == "claude") callClaude(apiKey, prompt, imageJpeg)
-                else callGemini(apiKey, prompt, imageJpeg)
+                val text = when (provider) {
+                    "claude" -> callClaude(apiKey, prompt, imageJpeg)
+                    "openai" -> callOpenAi(apiKey, prompt, imageJpeg)
+                    else -> callGemini(apiKey, prompt, imageJpeg)
+                }
                 return@withContext Result.success(text.trim())
             } catch (e: java.net.UnknownHostException) {
                 return@withContext Result.failure(RuntimeException("📡 인터넷에 연결되어 있지 않아요. 와이파이나 데이터를 켜고 다시 시도해줘."))
@@ -72,7 +85,7 @@ object AiCoach {
         return if (low.contains("quota") || low.contains("resource_exhausted") || low.contains("exceeded") || low.contains("429")) {
             val sec = Regex("retry in ([0-9.]+)s").find(raw)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
             val whenTxt = if (sec != null && sec < 120) "약 ${sec}초 뒤" else "분당 한도면 1분쯤 뒤, 일일 한도면 내일(태평양 자정)"
-            "무료 사용량(quota)을 다 썼어요 😢 $whenTxt 다시 풀려요.\n잠시 후 다시 누르거나, ⚙️ 설정에서 Claude로 바꿔봐."
+            "사용량(quota)·한도에 걸렸어요 😢 $whenTxt 다시 풀려요.\n잠시 후 다시 누르거나, ⚙️ 설정에서 다른 제공사로 바꿔봐."
         } else raw
     }
 
@@ -124,6 +137,27 @@ object AiCoach {
         )
         if (code !in 200..299) throw RuntimeException(parseError(resp, code))
         return JSONObject(resp).getJSONArray("content").getJSONObject(0).getString("text")
+    }
+
+    // ---------- OpenAI (GPT) ----------
+    private fun callOpenAi(apiKey: String, prompt: String, image: ByteArray?): String {
+        val content = JSONArray().put(JSONObject().put("type", "text").put("text", prompt))
+        if (image != null) {
+            content.put(JSONObject().put("type", "image_url").put("image_url", JSONObject()
+                .put("url", "data:image/jpeg;base64," + Base64.encodeToString(image, Base64.NO_WRAP))))
+        }
+        val body = JSONObject()
+            .put("model", OPENAI_MODEL)
+            .put("max_tokens", 1500)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        val (code, resp) = httpPost(
+            "https://api.openai.com/v1/chat/completions",
+            mapOf("Authorization" to "Bearer $apiKey", "Content-Type" to "application/json"),
+            body.toString()
+        )
+        if (code !in 200..299) throw RuntimeException(parseError(resp, code))
+        return JSONObject(resp).getJSONArray("choices").getJSONObject(0)
+            .getJSONObject("message").getString("content")
     }
 
     // ---------- 공통 HTTP ----------

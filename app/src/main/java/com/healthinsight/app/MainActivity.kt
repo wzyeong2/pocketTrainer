@@ -262,7 +262,7 @@ class MainActivity : ComponentActivity() {
     private fun generateProgram(sessions: Int, onResult: (Result<String>) -> Unit) {
         val provider = store.provider
         val key = store.keyFor(provider)
-        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
             val r = AiCoach.generateProgram(provider, key, athleteContext(), sessions)
@@ -275,7 +275,7 @@ class MainActivity : ComponentActivity() {
     private fun dailyCoach(workouts: List<WorkoutRecord>, onResult: (Result<String>) -> Unit) {
         val provider = store.provider
         val key = store.keyFor(provider)
-        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
             val sb = StringBuilder("너는 친한 운동 코치 친구야. 반말로 코칭해줘.\n\n")
@@ -292,7 +292,7 @@ class MainActivity : ComponentActivity() {
     private fun monthlyCoach(workouts: List<WorkoutRecord>, label: String, onResult: (Result<String>) -> Unit) {
         val provider = store.provider
         val key = store.keyFor(provider)
-        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
             val runs = workouts.filter { it.type == ExerciseType.RUNNING }
@@ -319,7 +319,7 @@ class MainActivity : ComponentActivity() {
         store.setMemo(w.id, memo)
         val provider = store.provider
         val key = store.keyFor(provider)
-        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${provider} 키를 먼저 넣어줘!"))); return }
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         val profile = athleteContext()
         val image = capturedBitmap.value?.let { jpegBytes(it) }
         store.recordAiCall()
@@ -1000,14 +1000,16 @@ private fun SettingsDialog(store: CoachStore, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var provider by remember { mutableStateOf(store.provider) }
-    var gKey by remember { mutableStateOf(store.geminiKey) }
-    var cKey by remember { mutableStateOf(store.claudeKey) }
+    val keys = remember {
+        mutableStateMapOf<String, String>().apply { AiCoach.PROVIDERS.forEach { put(it.id, store.keyFor(it.id)) } }
+    }
     var profile by remember { mutableStateOf(store.athleteProfile) }
     var testing by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onClose,
         confirmButton = { TextButton({
-            store.provider = provider; store.geminiKey = gKey; store.claudeKey = cKey
+            store.provider = provider
+            AiCoach.PROVIDERS.forEach { store.setKey(it.id, (keys[it.id] ?: "").trim()) }
             store.athleteProfile = profile
             Toast.makeText(context, "저장됐어요 ✅", Toast.LENGTH_SHORT).show()
             onClose()
@@ -1016,22 +1018,25 @@ private fun SettingsDialog(store: CoachStore, onClose: () -> Unit) {
         title = { Text("🤖 AI 설정") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(provider == "gemini", { provider = "gemini" }, { Text("Gemini (무료)") })
-                    FilterChip(provider == "claude", { provider = "claude" }, { Text("Claude") })
+                Text("AI 제공사 선택", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AiCoach.PROVIDERS.forEach { p ->
+                        FilterChip(provider == p.id, { provider = p.id }, { Text(p.label) })
+                    }
                 }
-                val key = if (provider == "gemini") gKey else cKey
-                if (provider == "gemini")
-                    OutlinedTextField(gKey, { gKey = it }, label = { Text("Gemini API 키") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                else
-                    OutlinedTextField(cKey, { cKey = it }, label = { Text("Claude API 키") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                val key = keys[provider] ?: ""
+                OutlinedTextField(
+                    key, { keys[provider] = it },
+                    label = { Text("${AiCoach.providerLabel(provider)} API 키") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
                 TextButton(
                     onClick = {
                         if (key.isBlank()) { Toast.makeText(context, "키를 먼저 입력해줘!", Toast.LENGTH_SHORT).show(); return@TextButton }
                         testing = true
                         Toast.makeText(context, "연결 확인 중...", Toast.LENGTH_SHORT).show()
                         scope.launch {
-                            val r = AiCoach.generate(provider, key, "안녕")
+                            val r = AiCoach.generate(provider, key.trim(), "안녕")
                             testing = false
                             r.onSuccess { Toast.makeText(context, "✅ 연결 성공!", Toast.LENGTH_LONG).show() }
                                 .onFailure { Toast.makeText(context, "❌ 실패: ${it.message}", Toast.LENGTH_LONG).show() }
@@ -1039,10 +1044,8 @@ private fun SettingsDialog(store: CoachStore, onClose: () -> Unit) {
                     },
                     enabled = !testing,
                 ) { Text("🔌 키 연결 테스트") }
-                Text(
-                    if (provider == "gemini") "무료 키: aistudio.google.com/apikey" else "키: console.anthropic.com",
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("키 발급: ${AiCoach.PROVIDERS.firstOrNull { it.id == provider }?.keyUrl ?: ""}",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider()
                 Text("🏃 내 프로필 (코칭에 항상 참고돼요)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 val maxLen = 1000

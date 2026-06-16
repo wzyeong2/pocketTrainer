@@ -10,15 +10,9 @@ class CoachStore(context: Context) {
         get() = prefs.getString("provider", "gemini") ?: "gemini"
         set(v) = prefs.edit().putString("provider", v).apply()
 
-    var geminiKey: String
-        get() = prefs.getString("key_gemini", "") ?: ""
-        set(v) = prefs.edit().putString("key_gemini", v).apply()
-
-    var claudeKey: String
-        get() = prefs.getString("key_claude", "") ?: ""
-        set(v) = prefs.edit().putString("key_claude", v).apply()
-
-    fun keyFor(p: String): String = if (p == "claude") claudeKey else geminiKey
+    /** 제공사별 API 키 (확장성: 제공사 id로 key_<id>에 저장) */
+    fun keyFor(provider: String): String = prefs.getString("key_$provider", "") ?: ""
+    fun setKey(provider: String, value: String) = prefs.edit().putString("key_$provider", value).apply()
 
     /** 오늘 AI 코칭 호출 횟수 (무료 quota 감 잡기용, 자정 리셋) */
     fun usageToday(): Int {
