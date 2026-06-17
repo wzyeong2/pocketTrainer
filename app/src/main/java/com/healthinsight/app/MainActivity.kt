@@ -528,6 +528,7 @@ fun MainScreen(
     var monthText by remember { mutableStateOf<String?>(null) }
     var monthLoading by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
+    var listExpanded by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var program by remember { mutableStateOf(ProgramParser.parse(store.programJson)) }
@@ -715,13 +716,13 @@ fun MainScreen(
         val defaultLimit = 15
         val allInScope = (if (selectedDate != null) byDate[selectedDate].orEmpty() else filtered)
             .sortedByDescending { it.id }
-        val listWorkouts = if (selectedDate == null) allInScope.take(defaultLimit) else allInScope
+        val listWorkouts = if (selectedDate == null && !listExpanded) allInScope.take(defaultLimit) else allInScope
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(selectedDate?.let { dateFmt.format(it) } ?: "최근 운동", fontWeight = FontWeight.Bold)
             if (selectedDate != null) TextButton({ selectedDate = null }) { Text("전체 보기 ✕") }
         }
-        if (selectedDate == null && allInScope.size > listWorkouts.size) {
-            Text("최근 ${listWorkouts.size}개 표시 · 전체 ${allInScope.size}개 — 위 달력에서 날짜를 누르면 그 날 기록만 봐요.",
+        if (selectedDate == null && !listExpanded && allInScope.size > defaultLimit) {
+            Text("최근 ${defaultLimit}개 표시 · 전체 ${allInScope.size}개 (아래 '더 보기' 또는 달력 날짜 탭)",
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (dayWorkouts.size >= 2) {
@@ -741,6 +742,11 @@ fun MainScreen(
         } else {
             listWorkouts.forEach { w ->
                 WorkoutItem(w, coached = store.getCoaching(w.id) != null) { onOpenDetail(); detail = w }
+            }
+        }
+        if (selectedDate == null && allInScope.size > defaultLimit) {
+            TextButton(onClick = { listExpanded = !listExpanded }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (listExpanded) "접기 ▲" else "전체 ${allInScope.size}개 더 보기 ▼")
             }
         }
         state.message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
