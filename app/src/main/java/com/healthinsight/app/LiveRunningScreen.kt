@@ -1,5 +1,6 @@
 package com.healthinsight.app
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -41,6 +42,7 @@ fun LiveRunningScreen(
     val scope = rememberCoroutineScope()
     var partyShown by remember { mutableStateOf(false) }
     LaunchedEffect(LiveCoach.phase) { if (LiveCoach.phase != "finished") partyShown = false }
+    BackHandler { onClose() }  // 뒤로가기 → 앱 종료 대신 메인으로 (서비스는 계속 — 종료는 ⏹️로)
 
     var targetText by remember { mutableStateOf("5:30") }
     var distText by remember { mutableStateOf("5") }
