@@ -72,23 +72,38 @@ class WorkoutRepository(private val context: Context) {
     }
 
     /**
-     * 중복/삭제 잔존 기록 제거.
-     * 삼성 헬스가 같은 운동을 2개로 기록하거나, 삼성헬스에서 지워도 Health Connect에
-     * 남는 경우가 있어, 같은 종류 + 같은 시작 시각(분 단위)이면 하나로 합친다.
+     * 중복 제거 — 삼성헬스 우선.
+     * 삼성헬스 + 구글핏이 같은 운동을 헬스커넥트에 이중 기록하므로,
+     * (1) 같은 분 중복은 삼성>심박>길이 순으로 하나만,
+     * (2) 다른 소스의 거의 동일 기록은 삼성 것을 남기고 제거,
+     * (3) 여러 운동을 감싼 합산 컨테이너(보통 구글핏) 제거. 삼성 기록은 항상 보호.
      */
     private fun dedupe(list: List<WorkoutRecord>): List<WorkoutRecord> {
-        // 1) 같은 종류 + 같은 시작(분) 완전 중복 → 가장 긴 것 하나만
+        fun pri(w: WorkoutRecord): Int = when {
+            w.source.contains("삼성") || w.fromWatch -> 3   // 삼성헬스/워치 최우선
+            w.avgHr != null -> 2                            // 심박 있는 기록
+            else -> 1
+        }
+        // 1) 같은 종류 + 같은 시작(분): 삼성>심박>길이 우선 하나만
         val merged = list.groupBy { it.type to (it.start.epochSecond / 60) }
-            .map { (_, group) -> group.maxByOrNull { it.durationSec } ?: group.first() }
+            .map { (_, g) -> g.maxWithOrNull(compareBy({ pri(it) }, { it.durationSec })) ?: g.first() }
 
-        // 2) 다른 기록 2개 이상을 시간상 통째로 감싸는 '합산 컨테이너'만 제거
-        //    (예: 달리기+자전거+달리기를 묶은 8.29km "달리기" 합산본)
-        //    1개만 겹치는 건 진짜 운동일 수 있으니 남긴다.
-        return merged.filter { a ->
-            val contained = merged.count { b ->
-                b !== a &&
-                    !a.start.isAfter(b.start) && !a.end.isBefore(b.end) && // a가 b를 시간 포함
-                    a.durationSec > b.durationSec
+        // 2) 다른 소스의 거의 동일 기록 제거 (삼성 우선 유지)
+        val crossDeduped = merged.filter { a ->
+            if (pri(a) >= 3) return@filter true
+            val hasSamsungDup = merged.any { b ->
+                b !== a && pri(b) >= 3 && b.type == a.type &&
+                    kotlin.math.abs(b.start.epochSecond - a.start.epochSecond) <= 90 &&
+                    kotlin.math.abs(b.durationSec - a.durationSec) <= maxOf(60L, a.durationSec / 4)
+            }
+            !hasSamsungDup
+        }
+
+        // 3) 다른 기록 2개 이상을 통째로 감싸는 합산 컨테이너 제거 (삼성 기록은 보호)
+        return crossDeduped.filter { a ->
+            if (pri(a) >= 3) return@filter true
+            val contained = crossDeduped.count { b ->
+                b !== a && !a.start.isAfter(b.start) && !a.end.isBefore(b.end) && a.durationSec > b.durationSec
             }
             contained < 2
         }.sortedByDescending { it.start }

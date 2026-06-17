@@ -528,6 +528,7 @@ fun MainScreen(
     var monthText by remember { mutableStateOf<String?>(null) }
     var monthLoading by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
+    var hiddenDialog by remember { mutableStateOf(false) }
     var listExpanded by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -705,6 +706,12 @@ fun MainScreen(
                 Text("📜 지난 코칭 다시 보기 (${coachLogs.size})")
             }
         }
+        val hiddenWorkouts = state.workouts.filter { it.id in hidden }
+        if (hiddenWorkouts.isNotEmpty()) {
+            OutlinedButton(onClick = { hiddenDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("🙈 숨긴 기록 ${hiddenWorkouts.size}개 보기/복원")
+            }
+        }
 
         if (state.loading) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -808,6 +815,32 @@ fun MainScreen(
     }
 
     if (historyOpen) CoachHistoryDialog(store.coachingLogs()) { historyOpen = false }
+
+    if (hiddenDialog) {
+        val hiddenList = state.workouts.filter { it.id in hidden }.sortedByDescending { it.id }
+        AlertDialog(
+            onDismissRequest = { hiddenDialog = false },
+            confirmButton = { TextButton({ hiddenDialog = false }) { Text("닫기") } },
+            title = { Text("🙈 숨긴 기록 (${hiddenList.size})") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (hiddenList.isEmpty()) Text("숨긴 기록이 없어요.")
+                    Text("실수로 숨긴 기록은 '복원'으로 다시 보이게 할 수 있어요.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    hiddenList.forEach { w ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                val amount = if (w.type.distanceBased && w.distanceMeters > 0) "%.2fkm".format(w.distanceKm) else formatDuration(w.durationSec)
+                                Text("${w.type.emoji} ${w.type.label} · $amount", fontSize = 13.sp)
+                                Text("${dateFmt.format(w.id.toLocalDate())} ${timeFmt.format(w.start)} · ${w.source}",
+                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = { store.unhide(w.id); hidden = store.hiddenIds() }) { Text("복원") }
+                        }
+                    }
+                }
+            }
+        )
+    }
 
     if (monthDialog) {
         AlertDialog(
@@ -977,7 +1010,8 @@ private fun WorkoutItem(w: WorkoutRecord, coached: Boolean, onClick: () -> Unit)
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Text(formatDuration(w.durationSec), fontWeight = FontWeight.Bold)
-                    Text("근력", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (w.type == ExerciseType.STRENGTH) "근력" else "시간(거리없음)",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
