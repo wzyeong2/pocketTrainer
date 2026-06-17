@@ -79,6 +79,86 @@ object AiCoach {
     fun recommendSessions(recentRunsLast21Days: Int): Int =
         Math.round(recentRunsLast21Days / 3.0).toInt().coerceIn(2, 5)
 
+    /** 대화형(멀티턴) 코칭. messages: (role[user/assistant], content) */
+    suspend fun chat(
+        provider: String, apiKey: String, system: String,
+        messages: List<Pair<String, String>>,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                val text = when (provider) {
+                    "claude" -> chatClaude(apiKey, system, messages)
+                    "openai" -> chatOpenAi(apiKey, system, messages)
+                    else -> chatGemini(apiKey, system, messages)
+                }
+                return@withContext Result.success(text.trim())
+            } catch (e: java.net.UnknownHostException) {
+                return@withContext Result.failure(RuntimeException("📡 인터넷에 연결되어 있지 않아요."))
+            } catch (e: java.io.IOException) {
+                lastError = e; delay(800L * (attempt + 1))
+            } catch (e: Exception) {
+                return@withContext Result.failure(RuntimeException(friendlyError(e.message ?: "오류")))
+            }
+        }
+        Result.failure(lastError ?: RuntimeException("네트워크 오류로 실패했어요"))
+    }
+
+    private fun chatOpenAi(apiKey: String, system: String, messages: List<Pair<String, String>>): String {
+        val arr = JSONArray().put(JSONObject().put("role", "system").put("content", system))
+        messages.forEach { (r, c) -> arr.put(JSONObject().put("role", r).put("content", c)) }
+        val body = JSONObject().put("model", OPENAI_MODEL).put("max_tokens", 1200).put("messages", arr)
+        val (code, resp) = httpPost("https://api.openai.com/v1/chat/completions",
+            mapOf("Authorization" to "Bearer $apiKey", "Content-Type" to "application/json"), body.toString())
+        if (code !in 200..299) throw RuntimeException(parseError(resp, code))
+        return JSONObject(resp).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+    }
+
+    private fun chatClaude(apiKey: String, system: String, messages: List<Pair<String, String>>): String {
+        val arr = JSONArray()
+        messages.forEach { (r, c) -> arr.put(JSONObject().put("role", r).put("content", c)) }
+        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", 1200)
+            .put("system", system).put("messages", arr)
+        val (code, resp) = httpPost("https://api.anthropic.com/v1/messages",
+            mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01", "content-type" to "application/json"),
+            body.toString())
+        if (code !in 200..299) throw RuntimeException(parseError(resp, code))
+        return JSONObject(resp).getJSONArray("content").getJSONObject(0).getString("text")
+    }
+
+    private fun chatGemini(apiKey: String, system: String, messages: List<Pair<String, String>>): String {
+        val contents = JSONArray()
+        messages.forEach { (r, c) ->
+            val role = if (r == "assistant") "model" else "user"
+            contents.put(JSONObject().put("role", role)
+                .put("parts", JSONArray().put(JSONObject().put("text", c))))
+        }
+        val body = JSONObject()
+            .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+            .put("contents", contents)
+        var lastErr = "알 수 없는 오류"
+        for (model in GEMINI_MODELS) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val (code, resp) = httpPost(url, mapOf("Content-Type" to "application/json"), body.toString())
+            if (code in 200..299) return JSONObject(resp).getJSONArray("candidates").getJSONObject(0)
+                .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+            lastErr = parseError(resp, code)
+            if (code != 429) throw RuntimeException(lastErr)
+        }
+        throw RuntimeException(lastErr)
+    }
+
+    /** 대략적 토큰·비용 추정 (입력 글자수 기준). 반환: (입력토큰, 예상USD) */
+    fun estimateCostUsd(provider: String, inputChars: Int, expectedOutTokens: Int = 800): Pair<Int, Double> {
+        val inTok = (inputChars / 2.0).toInt()  // 한국어 대략 2자/토큰
+        val (inRate, outRate) = when (provider) {
+            "openai" -> 2.5e-6 to 10e-6      // gpt-4o
+            "claude" -> 3e-6 to 15e-6        // sonnet
+            else -> 0.0 to 0.0               // gemini 무료
+        }
+        return inTok to (inTok * inRate + expectedOutTokens * outRate)
+    }
+
     /** 429/quota 등 원시 오류를 사용자 친화 메시지로 변환 */
     private fun friendlyError(raw: String): String {
         val low = raw.lowercase()
@@ -211,6 +291,9 @@ object CoachPrompt {
 부하 합산: 생활런·이동조깅도 다리 부담·부상 계산엔 100% 포함(단 기록향상 훈련효과는 낮게 평가). 하체운동(스쿼트 등) 피로와 러닝 피로가 겹치는지 같이 봐. 최근 주간거리가 급증했으면 안정화·부상방지를 최우선으로(심폐는 빨리 좋아져도 힘줄·정강이·발은 천천히 적응).
 """.trim()
 
+
+    /** 챗 시스템 프롬프트 등에서 재사용할 러닝 방법론 */
+    fun guide(): String = RUNNING_GUIDE
 
     fun summarize(w: WorkoutRecord): String = buildString {
         appendLine("• 종류: ${w.type.emoji} ${w.type.label}")

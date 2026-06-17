@@ -49,6 +49,36 @@ class CoachStore(context: Context) {
         get() = prefs.getString("last_program_result", "") ?: ""
         set(v) = prefs.edit().putString("last_program_result", v).apply()
 
+    /** 백필 분석 요약 (과거 기록으로 만든 러너 특성/추세 — 코칭·챗에 항상 참고) */
+    var athleteModel: String
+        get() = prefs.getString("athlete_model", "") ?: ""
+        set(v) = prefs.edit().putString("athlete_model", v).apply()
+    /** 지금까지 백필한 개월 수 (최근부터 거꾸로) */
+    var backfillMonths: Int
+        get() = prefs.getInt("backfill_months", 0)
+        set(v) = prefs.edit().putInt("backfill_months", v).apply()
+
+    /** 코치챗 대화 (role=user/assistant) */
+    fun chatMessages(): List<Pair<String, String>> {
+        val s = prefs.getString("chat_thread", "") ?: ""
+        if (s.isBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i); o.getString("r") to o.getString("c")
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+    fun addChatMessage(role: String, content: String) {
+        val cur = chatMessages().toMutableList()
+        cur.add(role to content)
+        val trimmed = cur.takeLast(40) // 비용 관리: 최근 40개만 유지
+        val arr = JSONArray()
+        trimmed.forEach { (r, c) -> arr.put(JSONObject().put("r", r).put("c", c)) }
+        prefs.edit().putString("chat_thread", arr.toString()).apply()
+    }
+    fun clearChat() = prefs.edit().remove("chat_thread").apply()
+
     /** 운동별 코칭 결과 */
     fun getCoaching(id: Long): String? = prefs.getString("coach_$id", null)
     fun setCoaching(id: Long, text: String) = prefs.edit().putString("coach_$id", text).apply()

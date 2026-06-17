@@ -164,6 +164,14 @@ class MainActivity : ComponentActivity() {
                                     screen.value = "main"
                                 },
                             )
+                            screen.value == "chat" -> CoachChatScreen(
+                                store = store,
+                                providerId = store.provider,
+                                onClose = { screen.value = "main" },
+                                onSend = ::sendChatThread,
+                                onBackfill = ::backfill,
+                                backfillInfo = ::backfillInfo,
+                            )
                             else -> MainScreen(
                                 state = ui.value,
                                 store = store,
@@ -172,6 +180,7 @@ class MainActivity : ComponentActivity() {
                                 onRefresh = { loadAll() },
                                 onDismissFirstVisit = { ui.value = ui.value.copy(firstVisitToday = false) },
                                 onLive = { screen.value = "live" },
+                                onChat = { screen.value = "chat" },
                                 onTakePhoto = { takePicture.launch(null) },
                                 onPickPhoto = { pickImage.launch("image/*") },
                                 onClearPhoto = { capturedBitmap.value = null },
@@ -365,6 +374,78 @@ class MainActivity : ComponentActivity() {
         return sb.toString()
     }
 
+    /** 러닝 한 건을 한 줄 요약 (백필·맥락용) */
+    private fun runLine(r: WorkoutRecord): String {
+        val hr = r.avgHr?.let { "/심박${it}" + (r.maxHr?.let { m -> "(최대$m)" } ?: "") } ?: ""
+        val el = r.elevationGainM?.let { if (it >= 5) "/상승${"%.0f".format(it)}m" else "" } ?: ""
+        val diff = courseDifficulty(r.elevationGainM, r.distanceMeters)?.let { "/${it.label}" } ?: ""
+        return "${dateFmt.format(r.id.toLocalDate())}: ${"%.2f".format(r.distanceKm)}km ${formatPace(r.avgPaceSecPerKm)}$hr$el$diff"
+    }
+
+    /** 코치챗 시스템 프롬프트 (프로필 + 최근기록 + 백필요약 + 방법론) */
+    private fun chatSystem(): String = buildString {
+        appendLine("너는 사용자의 러닝 코치야. 한국어 반말, 숫자 기반, 구체적으로. 이모지 쓰지 마. 일반론 말고 이 사람 데이터로 답하고, 통증 신호 있으면 보수적으로, 기록 욕심 과하면 제동을 걸어.")
+        appendLine()
+        append(athleteContext())
+        if (store.athleteModel.isNotBlank()) { appendLine(); appendLine("[과거 기록 분석 요약]"); appendLine(store.athleteModel) }
+        appendLine()
+        append(CoachPrompt.guide())
+    }
+
+    /** 다음 백필 청크(3개월) 대상 러닝 (1km 이상) */
+    private fun backfillChunkRuns(): List<WorkoutRecord> {
+        val months = store.backfillMonths
+        val end = LocalDate.now().minusMonths(months.toLong())
+        val start = end.minusMonths(3)
+        return ui.value.workouts.filter {
+            it.type == ExerciseType.RUNNING && it.distanceKm >= 1.0 &&
+                !it.id.toLocalDate().isBefore(start) && it.id.toLocalDate().isBefore(end)
+        }.sortedBy { it.start }
+    }
+
+    /** 다음 백필 청크 정보 (러닝수, 예상토큰, 예상USD) */
+    private fun backfillInfo(): Triple<Int, Int, Double> {
+        val runs = backfillChunkRuns()
+        val listText = runs.joinToString("\n") { runLine(it) }
+        val (tok, usd) = AiCoach.estimateCostUsd(store.provider, listText.length + 700)
+        return Triple(runs.size, tok, usd)
+    }
+
+    /** 코치챗 — 현재 대화 스레드를 보내 답변 받기 */
+    private fun sendChatThread(onResult: (Result<String>) -> Unit) {
+        val provider = store.provider; val key = store.keyFor(provider)
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
+        store.recordAiCall()
+        lifecycleScope.launch { onResult(AiCoach.chat(provider, key, chatSystem(), store.chatMessages())) }
+    }
+
+    /** 과거 기록 백필 — 다음 3개월 청크를 분석해 athleteModel 갱신 + 챗에 요약 추가 */
+    private fun backfill(onResult: (Result<String>) -> Unit) {
+        val provider = store.provider; val key = store.keyFor(provider)
+        if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
+        val runs = backfillChunkRuns()
+        if (runs.isEmpty()) { onResult(Result.failure(RuntimeException("이 기간엔 분석할 러닝(1km↑)이 없어요. 더 이전 기록이 없으면 백필 끝!"))); return }
+        store.recordAiCall()
+        lifecycleScope.launch {
+            val months = store.backfillMonths
+            val sb = StringBuilder()
+            sb.appendLine("너는 러닝 코치야. 아래는 사용자의 과거 러닝 기록(${months}~${months + 3}개월 전, 1km 이상)이야.")
+            sb.appendLine("이 데이터로 이 러너의 특성·추세·강점·리스크를 6~8줄로 요약해. 숫자 기반, 이모지 없이. 페이스·심박 효율 변화, 주력 거리, 부담 신호 위주로.")
+            if (store.athleteModel.isNotBlank()) {
+                sb.appendLine(); sb.appendLine("[기존 분석 요약 — 여기에 이번 기간을 통합해 갱신]"); sb.appendLine(store.athleteModel)
+            }
+            sb.appendLine(); sb.appendLine("[기록]")
+            runs.forEach { sb.appendLine(runLine(it)) }
+            val r = AiCoach.generate(provider, key, sb.toString(), null)
+            r.onSuccess {
+                store.athleteModel = it
+                store.backfillMonths = months + 3
+                store.addChatMessage("assistant", "[과거 기록 분석 · ${months}~${months + 3}개월 전 · ${runs.size}개]\n\n$it")
+            }
+            onResult(r)
+        }
+    }
+
     /** 새로 불러온 기록에서 5k·10k 최고기록 경신을 감지 → 빵빠레 메시지(없으면 null) */
     private fun checkPersonalBest(ws: List<WorkoutRecord>): String? {
         val level = computeRunningLevel(ws.filter { it.type == ExerciseType.RUNNING })
@@ -419,6 +500,7 @@ fun MainScreen(
     onRefresh: () -> Unit,
     onDismissFirstVisit: () -> Unit,
     onLive: () -> Unit,
+    onChat: () -> Unit,
     onTakePhoto: () -> Unit,
     onPickPhoto: () -> Unit,
     onClearPhoto: () -> Unit,
@@ -469,6 +551,7 @@ fun MainScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = onRefresh, enabled = !state.loading,
                     label = { Text(if (state.loading) "⏳" else "🔄") })
+                AssistChip(onClick = onChat, label = { Text("💬") })
                 AssistChip(onClick = onLive, label = { Text("🔴 라이브") })
                 AssistChip(onClick = { settingsOpen = true }, label = { Text("⚙️") })
             }
