@@ -1,6 +1,11 @@
 package com.healthinsight.app
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** 저장된 코칭 한 건 (운동별/하루/이번달/라이브 공통) */
+data class CoachLog(val time: Long, val kind: String, val title: String, val text: String)
 
 /** API 키·코칭 기록·메모를 기기에 저장 */
 class CoachStore(context: Context) {
@@ -47,6 +52,30 @@ class CoachStore(context: Context) {
     /** 운동별 코칭 결과 */
     fun getCoaching(id: Long): String? = prefs.getString("coach_$id", null)
     fun setCoaching(id: Long, text: String) = prefs.edit().putString("coach_$id", text).apply()
+
+    /** 모든 코칭 히스토리 (운동별·하루·이번달·라이브 통합, 최신순, 최대 50개) */
+    fun coachingLogs(): List<CoachLog> {
+        val s = prefs.getString("coach_logs", "") ?: ""
+        if (s.isBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                CoachLog(o.getLong("t"), o.getString("k"), o.getString("ti"), o.getString("tx"))
+            }.sortedByDescending { it.time }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    fun addCoachingLog(time: Long, kind: String, title: String, text: String) {
+        val cur = coachingLogs().toMutableList()
+        cur.add(0, CoachLog(time, kind, title, text))
+        val trimmed = cur.take(50)
+        val arr = JSONArray()
+        trimmed.forEach { l ->
+            arr.put(JSONObject().put("t", l.time).put("k", l.kind).put("ti", l.title).put("tx", l.text))
+        }
+        prefs.edit().putString("coach_logs", arr.toString()).apply()
+    }
 
     /** 운동별 메모 */
     fun getMemo(id: Long): String = prefs.getString("memo_$id", "") ?: ""

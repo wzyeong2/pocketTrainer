@@ -17,7 +17,7 @@ object AiCoach {
 
     private val GEMINI_MODELS = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite")
     private const val CLAUDE_MODEL = "claude-sonnet-4-6"
-    private const val OPENAI_MODEL = "gpt-4o-mini"
+    private const val OPENAI_MODEL = "gpt-4o"
 
     /** 지원 AI 제공사 — 여기에 한 줄 추가 + when 분기만 추가하면 새 제공사가 붙는다(확장성) */
     data class Provider(val id: String, val label: String, val keyUrl: String)
@@ -184,14 +184,31 @@ object AiCoach {
 /** 운동 기록 → 코칭 프롬프트 */
 object CoachPrompt {
 
-    /** 러닝 코칭 전문 지식 — 작은 모델도 전문적으로 답하게 주입 */
+    /** 러닝 코칭 방법론 — 일반론 말고 데이터 기반으로 답하게 주입 */
     private val RUNNING_GUIDE = """
-[코칭 지침 — 러닝 (반드시 반영)]
-- 경사도(%) = 상승고도(m) ÷ 거리(m) × 100. 누적고도만 보지 말고, 오르막이 어느 구간에 몰렸는지·경사도를 감안해.
-- GAP(경사보정페이스): 오르막은 평지보다 느린 게 정상. 대략 +1% 오르막 ≈ 10~20초/km 손해, +2% ≈ 25~40초, +3% ≈ 40~60초, +5%↑는 페이스 욕심 금지.
-- 심박 해석: 같은 페이스라도 오르막·선행피로·더위면 심박이 오름. 페이스만 보지 말고 심박과 묶어서 '효율'을 평가해.
-- [내 프로필]의 최근 기록과 비교해서(거리·페이스·심박·고도 차이) 왜 이렇게 나왔는지 설명해줘.
-- 유산소런이면 "오르막에선 페이스를 버리고 목표 심박을 지켜라"로 코칭. 성공 기준은 페이스가 아니라 심박을 안 터뜨리는 것.
+[러닝 코칭 방법론 — 반드시 이 기준으로]
+말투: 한국어 반말, 숫자 기반, 구체적. 이모지 쓰지 마. 일반론 금지 — 이 사람의 실제 기록·심박·고도·최근 피로로 "다음에 뭘 어떻게 할지"를 바로 정해줘. 기록 욕심이 과하면 제동, 통증 신호 있으면 보수적으로.
+
+훈련 분류(먼저 판정): 회복런 / 회복성 이지런 / 이지런 / 이지런 상단 / 보통런 / 템포런 / 기록주 / 고도런 / 분산형 유산소런. 페이스만 보지 말고 심박·고도·최근 피로·생활런·하체운동까지 반영해서 분류해.
+
+심박존(일반 기준 — [내 프로필]에 개인 기준 있으면 그게 우선):
+- 회복런 7'00~7'40/km, 심박 130~140
+- 이지런 6'40~7'20/km, 심박 140~145
+- 유산소런 목표심박 142 전후 (페이스보다 심박 우선)
+- 롱이지런 6'50~7'30/km, 심박 145~150 이하
+- 보통런 5'50~6'10/km, 심박 150대
+- 템포/기록주 5'30/km 이하, 심박 159+
+심박 목표가 있었으면 성공/실패는 페이스가 아니라 "목표 심박을 지켰나"로 판단해.
+
+경사 보정(GAP): 경사도% = 상승고도m ÷ 거리m × 100.
+- +1% 오르막 ≈ 평지보다 10~20초/km 손해, 심박 +5~8
+- +2% ≈ 25~40초/km, 심박 +8~12
+- +3% ≈ 40~60초/km, +5%↑는 페이스 욕심 금지
+누적고도만 보지 말고 "오르막이 후반에 몰렸는지"를 봐 — 후반 오르막은 평균심박을 크게 올려. 같은 페이스도 오르막·더위·선행피로면 심박이 오르니 '효율'로 평가해.
+
+부상 신호(있으면 보수적): 정강이 앞 한 점 통증, 종아리 뒤 부음/열감, 아킬레스 찌릿, 무릎 위 허벅지, 허벅지 사이드, 발가락/발볼 압박. 걷기·계단 내려갈 때 통증이 지속되면 러닝 금지하고 휴식/걷기/자전거로 돌려. 강한 기록주·템포 후엔 24~48시간 회복을 '훈련'으로 처방해.
+
+부하 합산: 생활런·이동조깅도 다리 부담·부상 계산엔 100% 포함(단 기록향상 훈련효과는 낮게 평가). 하체운동(스쿼트 등) 피로와 러닝 피로가 겹치는지 같이 봐. 최근 주간거리가 급증했으면 안정화·부상방지를 최우선으로(심폐는 빨리 좋아져도 힘줄·정강이·발은 천천히 적응).
 """.trim()
 
 
@@ -217,41 +234,45 @@ object CoachPrompt {
     }
 
     fun build(w: WorkoutRecord, memo: String, profile: String, hasImage: Boolean): String = buildString {
-        appendLine("너는 사용자의 친한 운동 코치 친구야. 반말로 친근하고 격려하는 말투로 코칭해줘. 이모지도 적당히.")
+        appendLine("너는 사용자의 러닝/운동 코치야. 한국어 반말로, 숫자 기반으로 구체적으로 코칭해. 이모지는 쓰지 마. 일반론 말고 이 사람의 데이터로 다음 행동을 바로 정해줘.")
         appendLine()
         if (profile.isNotBlank()) { append(profile); appendLine() }
         appendLine("[오늘 운동]")
         append(summarize(w))
         if (memo.isNotBlank()) appendLine("• 메모: $memo")
-        val elev = w.elevationGainM
-        if (elev != null && elev > 5.0) {
-            appendLine("• 참고: 고도 상승 ${"%.0f".format(elev)}m. 오르막 구간이 있으니 페이스를 평가할 때 경사를 감안해서 봐줘.")
-        }
         if (hasImage) appendLine("\n첨부한 사진도 함께 분석해줘 (기구/자세/장소/식단 등).")
-        if (w.type == ExerciseType.RUNNING) { appendLine(); append(RUNNING_GUIDE) }
-        appendLine()
-        appendLine("위 [내 프로필]과 [오늘 운동]을 함께 고려해서, 아래 형식으로 (제목 유지):")
-        appendLine("### 1. 오늘 평가")
-        appendLine("### 2. 다음 훈련 처방")
-        when (w.type) {
-            ExerciseType.RUNNING -> {
-                appendLine("(인터벌/템포런/롱런 중 선택 + 구체적으로)")
-                appendLine("### 3. 구간별 목표 페이스")
-                appendLine("### 4. 심박수 목표")
+        if (w.type == ExerciseType.RUNNING) {
+            appendLine(); append(RUNNING_GUIDE); appendLine(); appendLine()
+            appendLine("위 방법론과 [내 프로필]·[오늘 운동]을 종합해서, 정확히 아래 7개 제목으로 답해 (제목 유지):")
+            appendLine("### 1. 훈련 분류")
+            appendLine("(회복/이지/이지상단/보통/템포/기록주/고도런/분산형 중 판정 + 근거)")
+            appendLine("### 2. 기록 요약")
+            appendLine("(거리·시간·평균페이스·평균/최대심박·누적고도·경사, 가능하면 이전 기록 대비)")
+            appendLine("### 3. 잘한 점")
+            appendLine("### 4. 아쉬운 점")
+            appendLine("### 5. 부상 리스크")
+            appendLine("(체크할 부위 + 내일 아침 확인할 증상)")
+            appendLine("### 6. 다음 운동")
+            appendLine("(러닝 가능 여부 + 거리·페이스·심박·코스·금지사항까지 구체적으로)")
+            appendLine("### 7. 한 줄 결론")
+        } else {
+            appendLine()
+            appendLine("위 [내 프로필]과 [오늘 운동]을 함께 고려해서 아래 형식으로 (제목 유지):")
+            appendLine("### 1. 오늘 평가")
+            appendLine("### 2. 다음 훈련 처방")
+            when (w.type) {
+                ExerciseType.STRENGTH -> {
+                    appendLine("(다음 분할/종목·중량·세트·휴식)")
+                    appendLine("### 3. 자세·폼 팁"); appendLine("### 4. 강도 가이드")
+                }
+                else -> {
+                    appendLine("(다음 목표 거리·시간·강도)")
+                    appendLine("### 3. 페이스·심박 가이드")
+                }
             }
-            ExerciseType.STRENGTH -> {
-                appendLine("(다음 분할/종목·중량·세트·휴식)")
-                appendLine("### 3. 자세·폼 팁")
-                appendLine("### 4. 강도 가이드")
-            }
-            else -> {
-                appendLine("(다음 목표 거리·시간·강도)")
-                appendLine("### 3. 페이스·심박 가이드")
-            }
+            appendLine("### 5. 준비운동"); appendLine("### 6. 보조 운동")
         }
-        appendLine("### 5. 준비운동")
-        appendLine("### 6. 보조 운동")
         appendLine()
-        append("핵심만, 너무 길지 않게.")
+        append("숫자로 구체적으로, 군더더기 없이.")
     }
 }

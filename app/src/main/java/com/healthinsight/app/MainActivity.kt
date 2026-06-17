@@ -278,12 +278,13 @@ class MainActivity : ComponentActivity() {
         if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
-            val sb = StringBuilder("너는 친한 운동 코치 친구야. 반말로 코칭해줘.\n\n")
+            val sb = StringBuilder("너는 운동 코치야. 한국어 반말, 숫자 기반, 구체적으로. 이모지 쓰지 마.\n\n")
             sb.append(athleteContext()).append("\n")
             sb.append("[오늘 한 운동들]\n")
             workouts.sortedBy { it.start }.forEach { sb.append("• ").append(CoachPrompt.summarize(it).replace("\n", " ").trim()).append("\n") }
             sb.append("\n위 [내 프로필]을 참고해서 아래 형식으로 (제목 유지):\n### 1. 오늘 전체 평가\n### 2. 운동 조합/균형 피드백\n### 3. 내일 추천\n핵심만, 너무 길지 않게.")
             val r = AiCoach.generate(provider, key, sb.toString(), null)
+            r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "하루 종합", dateFmt.format(LocalDate.now()), it) }
             onResult(r)
         }
     }
@@ -296,7 +297,7 @@ class MainActivity : ComponentActivity() {
         store.recordAiCall()
         lifecycleScope.launch {
             val runs = workouts.filter { it.type == ExerciseType.RUNNING }
-            val sb = StringBuilder("너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n\n")
+            val sb = StringBuilder("너는 러닝 코치야. 한국어 반말, 숫자 기반, 구체적으로. 이모지 쓰지 마.\n\n")
             sb.append(athleteContext()).append("\n")
             sb.append("[$label 훈련 요약]\n")
             sb.append("- 총 운동 ${workouts.size}회 (러닝 ${runs.size}회)\n")
@@ -310,6 +311,7 @@ class MainActivity : ComponentActivity() {
             sb.append("\n위 한 달치 훈련을 보고 아래 형식으로 (제목 유지):\n")
             sb.append("### 1. 이번 달 총평\n### 2. 훈련량·빈도·페이스 추세\n### 3. 다음 달 목표·처방\n핵심만, 너무 길지 않게.")
             val r = AiCoach.generate(provider, key, sb.toString(), null)
+            r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "이번 달", label, it) }
             onResult(r)
         }
     }
@@ -326,7 +328,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val prompt = CoachPrompt.build(w, memo, profile, image != null)
             val r = AiCoach.generate(provider, key, prompt, image)
-            r.onSuccess { store.setCoaching(w.id, it) }
+            r.onSuccess {
+                store.setCoaching(w.id, it)
+                store.addCoachingLog(System.currentTimeMillis(), "운동 코칭",
+                    "${w.type.emoji} ${w.type.label} · ${dateFmt.format(w.id.toLocalDate())}", it)
+            }
             onResult(r)
         }
     }
@@ -419,6 +425,7 @@ fun MainScreen(
     var monthDialog by remember { mutableStateOf(false) }
     var monthText by remember { mutableStateOf<String?>(null) }
     var monthLoading by remember { mutableStateOf(false) }
+    var historyOpen by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var program by remember { mutableStateOf(ProgramParser.parse(store.programJson)) }
@@ -586,6 +593,13 @@ fun MainScreen(
         BestRecordsCard(state.workouts)
         StatsCard(state.workouts)
 
+        val coachLogs = store.coachingLogs()
+        if (coachLogs.isNotEmpty()) {
+            OutlinedButton(onClick = { historyOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("📜 지난 코칭 다시 보기 (${coachLogs.size})")
+            }
+        }
+
         if (state.loading) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text("불러오는 중...")
@@ -681,6 +695,8 @@ fun MainScreen(
             }
         )
     }
+
+    if (historyOpen) CoachHistoryDialog(store.coachingLogs()) { historyOpen = false }
 
     if (monthDialog) {
         AlertDialog(
@@ -1264,6 +1280,46 @@ private fun CelebrationOverlay(message: String, onDone: () -> Unit) {
             }
         }
     }
+}
+
+private fun kindEmoji(kind: String): String = when {
+    kind.contains("라이브") -> "🔴"
+    kind.contains("달") -> "📅"
+    kind.contains("하루") -> "📋"
+    else -> "💪"
+}
+
+/** 저장된 코칭 전체 보기 — 항목 탭하면 펼쳐짐 */
+@Composable
+private fun CoachHistoryDialog(logs: List<CoachLog>, onClose: () -> Unit) {
+    var expanded by remember { mutableStateOf<Long?>(null) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        confirmButton = { TextButton(onClose) { Text("닫기") } },
+        title = { Text("📜 코칭 기록 (${logs.size})") },
+        text = {
+            if (logs.isEmpty()) Text("아직 저장된 코칭이 없어요.")
+            else Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                logs.forEach { log ->
+                    val open = expanded == log.time
+                    Card(Modifier.fillMaxWidth().clickableNoRipple { expanded = if (open) null else log.time }) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("${kindEmoji(log.kind)} ${log.kind} · ${log.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${dateFmt.format(log.time.toLocalDate())} ${timeFmt.format(java.time.Instant.ofEpochMilli(log.time))}",
+                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (open) {
+                                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                MarkdownText(log.text, baseSize = 13.sp)
+                            } else {
+                                Text(log.text.replace("\n", " ").replace("#", "").replace("*", "").trim().take(50) + "…",
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 /** 리플 없는 단순 클릭 */

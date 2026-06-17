@@ -75,7 +75,7 @@ fun LiveRunningScreen(
                     store.recordAiCall()
                     scope.launch {
                         val pace = if (km > 0) (sec / km).roundToInt() else 0
-                        val sb = StringBuilder("너는 친한 러닝 코치 친구야. 반말로 코칭해줘.\n")
+                        val sb = StringBuilder("너는 러닝 코치야. 한국어 반말, 숫자 기반, 구체적으로. 이모지 쓰지 마.\n")
                         if (store.athleteProfile.isNotBlank()) sb.append("[내 프로필] ${store.athleteProfile}\n")
                         sb.append("[방금 라이브 러닝] 거리 ${"%.2f".format(km)}km, 시간 ${mmss(sec.toInt())}, 평균 페이스 ${mmss(pace)}\n")
                         BleHeart.bpm?.let { sb.append("[종료 시 심박] ${it}bpm\n") }
@@ -97,6 +97,7 @@ fun LiveRunningScreen(
                         val r = AiCoach.generate(store.provider, key, sb.toString())
                         coachLoading = false
                         summaryCoach = r.fold({ it }, { "실패: ${it.message}" })
+                        r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "라이브 코칭", "라이브 ${"%.2f".format(km)}km", it) }
                     }
                 },
                 onCloseClick = { LiveCoach.phase = "idle"; summaryCoach = null; onClose() })
