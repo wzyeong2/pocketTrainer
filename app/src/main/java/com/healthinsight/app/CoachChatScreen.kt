@@ -28,6 +28,7 @@ fun CoachChatScreen(
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var costDialog by remember { mutableStateOf(false) }
+    var resetDialog by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val scroll = rememberScrollState()
     LaunchedEffect(messages.size, loading) { scroll.animateScrollTo(scroll.maxValue) }
@@ -36,7 +37,7 @@ fun CoachChatScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("💬 코치챗", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row {
-                TextButton(onClick = { store.clearChat(); messages = emptyList() }) { Text("초기화") }
+                TextButton(onClick = { resetDialog = true }) { Text("초기화") }
                 TextButton(onClick = onClose) { Text("닫기") }
             }
         }
@@ -106,6 +107,21 @@ fun CoachChatScreen(
                 enabled = !loading
             ) { Text("전송") }
         }
+    }
+
+    if (resetDialog) {
+        AlertDialog(
+            onDismissRequest = { resetDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    store.clearChat(); store.backfillMonths = 0; store.athleteModel = ""
+                    messages = emptyList(); resetDialog = false
+                }) { Text("전체 초기화") }
+            },
+            dismissButton = { TextButton({ resetDialog = false }) { Text("취소") } },
+            title = { Text("코치챗 초기화") },
+            text = { Text("대화와 과거 기록 분석을 모두 지워요. 이후 '📊 과거 기록 분석'으로 처음부터 다시 분석할 수 있어요.") }
+        )
     }
 
     if (costDialog) {
