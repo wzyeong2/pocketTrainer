@@ -351,6 +351,17 @@ class MainActivity : ComponentActivity() {
         val note = store.athleteProfile
         if (note.isNotBlank()) sb.appendLine("- 본인 메모: $note")
         if (store.lastProgramResult.isNotBlank()) sb.appendLine("- 지난 프로그램 세션 결과: ${store.lastProgramResult}")
+        // 최근 러닝 기록 — 이전 기록과 비교(추세·심박효율)할 수 있게 코칭에 같이 제공
+        val recentRuns = runs.sortedByDescending { it.start }.take(10)
+        if (recentRuns.isNotEmpty()) {
+            sb.appendLine("- 최근 러닝 기록(최신순):")
+            recentRuns.forEach { r ->
+                val hr = r.avgHr?.let { "/심박${it}" + (r.maxHr?.let { m -> "(최대$m)" } ?: "") } ?: ""
+                val el = r.elevationGainM?.let { if (it >= 5) "/상승${"%.0f".format(it)}m" else "" } ?: ""
+                val diff = courseDifficulty(r.elevationGainM, r.distanceMeters)?.let { "/${it.label}" } ?: ""
+                sb.appendLine("  · ${dateFmt.format(r.id.toLocalDate())}: ${"%.2f".format(r.distanceKm)}km ${formatPace(r.avgPaceSecPerKm)}$hr$el$diff")
+            }
+        }
         return sb.toString()
     }
 
