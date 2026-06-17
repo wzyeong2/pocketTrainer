@@ -433,7 +433,13 @@ class MainActivity : ComponentActivity() {
             val months = store.backfillMonths
             val sb = StringBuilder()
             sb.appendLine("너는 러닝 코치야. 아래는 사용자의 과거 러닝 기록(${months}~${months + 3}개월 전, 1km 이상)이야.")
-            sb.appendLine("이 데이터로 이 러너의 특성·추세·강점·리스크를 6~8줄로 요약해. 숫자 기반, 이모지 없이. 페이스·심박 효율 변화, 주력 거리, 부담 신호 위주로.")
+            sb.appendLine("이 데이터로 '러너 모델'을 아래 항목별로 정리해. 숫자 기반, 이모지 없이, 각 항목 1~2문장으로 구체적으로:")
+            sb.appendLine("- 주력 거리/빈도")
+            sb.appendLine("- 페이스 추세(시기별 변화, 구체 수치)")
+            sb.appendLine("- 심박 효율(같은 페이스 대비 심박 변화)")
+            sb.appendLine("- 강점")
+            sb.appendLine("- 부담/부상 리스크 신호")
+            sb.appendLine("- 다음 권장 방향")
             if (store.athleteModel.isNotBlank()) {
                 sb.appendLine(); sb.appendLine("[기존 분석 요약 — 여기에 이번 기간을 통합해 갱신]"); sb.appendLine(store.athleteModel)
             }
@@ -549,15 +555,17 @@ fun MainScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MascotBadge(34)
-                Text("포켓 트레이너", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("포켓 트레이너", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = onRefresh, enabled = !state.loading,
-                    label = { Text(if (state.loading) "⏳" else "🔄") })
-                AssistChip(onClick = onChat, label = { Text("💬") })
-                AssistChip(onClick = onLive, label = { Text("🔴 라이브") })
-                AssistChip(onClick = { settingsOpen = true }, label = { Text("⚙️") })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onRefresh, enabled = !state.loading) { Text(if (state.loading) "⏳" else "🔄") }
+                TextButton(onClick = { settingsOpen = true }) { Text("⚙️ 설정") }
             }
+        }
+        // 주요 기능 바로가기 (큰 버튼으로 — 찾기 쉽게)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = onChat, modifier = Modifier.weight(1f)) { Text("💬 코치챗") }
+            FilledTonalButton(onClick = onLive, modifier = Modifier.weight(1f)) { Text("🔴 라이브 코치") }
         }
 
         if (!state.available) { InfoCard("Health Connect 사용 불가", state.message ?: ""); return@Column }

@@ -2,11 +2,14 @@ package com.healthinsight.app
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,6 +28,7 @@ fun CoachChatScreen(
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var costDialog by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     val scroll = rememberScrollState()
     LaunchedEffect(messages.size, loading) { scroll.animateScrollTo(scroll.maxValue) }
 
@@ -45,34 +49,43 @@ fun CoachChatScreen(
             )
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Spacer(Modifier.height(6.dp))
-            if (messages.isEmpty()) {
-                Text(
-                    "러닝에 대해 뭐든 물어봐.\n예) 오늘 7km 뛰었는데 내일 뛰어도 돼? / 10km 55분 코스 전략 짜줘\n\n먼저 '과거 기록 분석'을 누르면 내 기록을 학습해서 더 정확해져.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
-                )
-            }
-            messages.forEach { (role, content) ->
-                if (role == "user") {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                            Text(content, Modifier.padding(10.dp).widthIn(max = 280.dp), fontSize = 14.sp)
+        SelectionContainer(Modifier.weight(1f)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(6.dp))
+                if (messages.isEmpty()) {
+                    Text(
+                        "러닝에 대해 뭐든 물어봐.\n예) 오늘 7km 뛰었는데 내일 뛰어도 돼? / 10km 55분 코스 전략 짜줘\n\n먼저 '과거 기록 분석'을 누르면 내 기록을 학습해서 더 정확해져.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                    )
+                }
+                messages.forEach { (role, content) ->
+                    if (role == "user") {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                                Text(content, Modifier.padding(10.dp).widthIn(max = 280.dp), fontSize = 14.sp)
+                            }
                         }
-                    }
-                } else {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            MarkdownText(content, Modifier.padding(10.dp).widthIn(max = 300.dp), baseSize = 14.sp)
+                    } else {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                Column(Modifier.padding(10.dp).widthIn(max = 300.dp)) {
+                                    MarkdownText(content, baseSize = 14.sp)
+                                    // 길게 눌러 선택 복사 + 원탭 복사
+                                    TextButton(
+                                        onClick = { clipboard.setText(AnnotatedString(content)) },
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                    ) { Text("📋 복사", fontSize = 11.sp) }
+                                }
+                            }
                         }
                     }
                 }
+                if (loading) Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp)); Text("코치가 생각 중...", fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(6.dp))
             }
-            if (loading) Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp)); Text("코치가 생각 중...", fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(6.dp))
         }
 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
