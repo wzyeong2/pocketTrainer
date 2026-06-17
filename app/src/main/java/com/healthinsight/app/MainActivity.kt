@@ -360,6 +360,10 @@ class MainActivity : ComponentActivity() {
         val note = store.athleteProfile
         if (note.isNotBlank()) sb.appendLine("- 본인 메모: $note")
         if (store.lastProgramResult.isNotBlank()) sb.appendLine("- 지난 프로그램 세션 결과: ${store.lastProgramResult}")
+        if (store.athleteModel.isNotBlank()) {
+            sb.appendLine("[과거 기록 분석 요약]")
+            sb.appendLine(store.athleteModel)
+        }
         // 최근 러닝 기록 — 이전 기록과 비교(추세·심박효율)할 수 있게 코칭에 같이 제공
         val recentRuns = runs.sortedByDescending { it.start }.take(10)
         if (recentRuns.isNotEmpty()) {
@@ -386,8 +390,7 @@ class MainActivity : ComponentActivity() {
     private fun chatSystem(): String = buildString {
         appendLine("너는 사용자의 러닝 코치야. 한국어 반말, 숫자 기반, 구체적으로. 이모지 쓰지 마. 일반론 말고 이 사람 데이터로 답하고, 통증 신호 있으면 보수적으로, 기록 욕심 과하면 제동을 걸어.")
         appendLine()
-        append(athleteContext())
-        if (store.athleteModel.isNotBlank()) { appendLine(); appendLine("[과거 기록 분석 요약]"); appendLine(store.athleteModel) }
+        append(athleteContext())  // athleteContext에 과거 기록 분석 요약 포함됨
         appendLine()
         append(CoachPrompt.guide())
     }
