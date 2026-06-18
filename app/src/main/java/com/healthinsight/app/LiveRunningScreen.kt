@@ -96,10 +96,14 @@ fun LiveRunningScreen(
                         } else {
                             sb.append("[목표] 10km 50분 이내\n### 1. 오늘 평가\n### 2. 다음 훈련 처방\n### 3. 페이스 전략\n핵심만 짧게.")
                         }
-                        val r = AiCoach.generate(store.provider, key, sb.toString())
+                        val prompt = sb.toString()
+                        val r = AiCoach.generate(store.provider, key, prompt)
                         coachLoading = false
                         summaryCoach = r.fold({ it }, { "실패: ${it.message}" })
-                        r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "라이브 코칭", "라이브 ${"%.2f".format(km)}km", it) }
+                        r.onSuccess {
+                            store.addCoachingLog(System.currentTimeMillis(), "라이브 코칭", "라이브 ${"%.2f".format(km)}km", it)
+                            store.addUsage("라이브 코칭", store.provider, AiCoach.estimateCostUsd(store.provider, prompt.length).second)
+                        }
                     }
                 },
                 onCloseClick = { LiveCoach.phase = "idle"; summaryCoach = null; onClose() })

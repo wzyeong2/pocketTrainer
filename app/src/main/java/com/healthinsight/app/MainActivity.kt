@@ -274,8 +274,12 @@ class MainActivity : ComponentActivity() {
         if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
         lifecycleScope.launch {
-            val r = AiCoach.generateProgram(provider, key, athleteContext(), sessions)
-            r.onSuccess { store.programJson = it; store.programDate = java.time.LocalDate.now().toString() }
+            val ctx = athleteContext()
+            val r = AiCoach.generateProgram(provider, key, ctx, sessions)
+            r.onSuccess {
+                store.programJson = it; store.programDate = java.time.LocalDate.now().toString()
+                logUsage("주간 프로그램", ctx.length + 400)
+            }
             onResult(r)
         }
     }
@@ -293,7 +297,10 @@ class MainActivity : ComponentActivity() {
             workouts.sortedBy { it.start }.forEach { sb.append("• ").append(CoachPrompt.summarize(it).replace("\n", " ").trim()).append("\n") }
             sb.append("\n위 [내 프로필]을 참고해서 아래 형식으로 (제목 유지):\n### 1. 오늘 전체 평가\n### 2. 운동 조합/균형 피드백\n### 3. 내일 추천\n핵심만, 너무 길지 않게.")
             val r = AiCoach.generate(provider, key, sb.toString(), null)
-            r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "하루 종합", dateFmt.format(LocalDate.now()), it) }
+            r.onSuccess {
+                store.addCoachingLog(System.currentTimeMillis(), "하루 종합", dateFmt.format(LocalDate.now()), it)
+                logUsage("하루 종합", sb.length)
+            }
             onResult(r)
         }
     }
@@ -320,7 +327,10 @@ class MainActivity : ComponentActivity() {
             sb.append("\n위 한 달치 훈련을 보고 아래 형식으로 (제목 유지):\n")
             sb.append("### 1. 이번 달 총평\n### 2. 훈련량·빈도·페이스 추세\n### 3. 다음 달 목표·처방\n핵심만, 너무 길지 않게.")
             val r = AiCoach.generate(provider, key, sb.toString(), null)
-            r.onSuccess { store.addCoachingLog(System.currentTimeMillis(), "이번 달", label, it) }
+            r.onSuccess {
+                store.addCoachingLog(System.currentTimeMillis(), "이번 달", label, it)
+                logUsage("이번 달", sb.length)
+            }
             onResult(r)
         }
     }
@@ -341,6 +351,7 @@ class MainActivity : ComponentActivity() {
                 store.setCoaching(w.id, it)
                 store.addCoachingLog(System.currentTimeMillis(), "운동 코칭",
                     "${w.type.emoji} ${w.type.label} · ${dateFmt.format(w.id.toLocalDate())}", it)
+                logUsage("운동 코칭", prompt.length)
             }
             onResult(r)
         }
@@ -376,6 +387,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         return sb.toString()
+    }
+
+    /** AI 호출 1건의 예상 비용을 사용 내역에 기록 */
+    private fun logUsage(kind: String, promptChars: Int) {
+        val usd = AiCoach.estimateCostUsd(store.provider, promptChars).second
+        store.addUsage(kind, store.provider, usd)
     }
 
     /** 러닝 한 건을 한 줄 요약 (백필·맥락용) */
@@ -419,7 +436,12 @@ class MainActivity : ComponentActivity() {
         val provider = store.provider; val key = store.keyFor(provider)
         if (key.isBlank()) { onResult(Result.failure(RuntimeException("⚙️ 설정에서 ${AiCoach.providerLabel(provider)} 키를 먼저 넣어줘!"))); return }
         store.recordAiCall()
-        lifecycleScope.launch { onResult(AiCoach.chat(provider, key, chatSystem(), store.chatMessages())) }
+        lifecycleScope.launch {
+            val sys = chatSystem(); val msgs = store.chatMessages()
+            val r = AiCoach.chat(provider, key, sys, msgs)
+            r.onSuccess { logUsage("코치챗", sys.length + msgs.sumOf { it.second.length }) }
+            onResult(r)
+        }
     }
 
     /** 과거 기록 백필 — 다음 3개월 청크를 분석해 athleteModel 갱신 + 챗에 요약 추가 */
@@ -450,6 +472,7 @@ class MainActivity : ComponentActivity() {
                 store.athleteModel = it
                 store.backfillMonths = months + 3
                 store.addChatMessage("assistant", "[과거 기록 분석 · ${months}~${months + 3}개월 전 · ${runs.size}개]\n\n$it")
+                logUsage("과거 분석", sb.length)
             }
             onResult(r)
         }
@@ -529,6 +552,7 @@ fun MainScreen(
     var monthLoading by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
     var hiddenDialog by remember { mutableStateOf(false) }
+    var usageDialog by remember { mutableStateOf(false) }
     var listExpanded by remember { mutableStateOf(false) }
     var dailySelectOpen by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -718,6 +742,13 @@ fun MainScreen(
                 Text("🙈 숨긴 기록 ${hiddenWorkouts.size}개 보기/복원")
             }
         }
+        val usageList = store.usageLogs()
+        if (usageList.isNotEmpty()) {
+            val total = usageList.sumOf { it.costUsd }
+            OutlinedButton(onClick = { usageDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("💳 AI 사용 내역 (${usageList.size}회" + (if (total > 0) " · 약 ${(total * 1450).toInt()}원" else "") + ")")
+            }
+        }
 
         if (state.loading) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -821,6 +852,34 @@ fun MainScreen(
     }
 
     if (historyOpen) CoachHistoryDialog(store.coachingLogs()) { historyOpen = false }
+
+    if (usageDialog) {
+        val usage = store.usageLogs()
+        val total = usage.sumOf { it.costUsd }
+        AlertDialog(
+            onDismissRequest = { usageDialog = false },
+            confirmButton = { TextButton({ usageDialog = false }) { Text("닫기") } },
+            title = { Text("💳 AI 사용 내역") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("총 ${usage.size}회 · 약 \$${"%.3f".format(total)} (~${(total * 1450).toInt()}원)", fontWeight = FontWeight.Bold)
+                    Text("※ 토큰 추정 기반 예상치예요. Gemini는 무료. 정확한 청구는 제공사 콘솔에서 확인.",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    usage.forEach { u ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("${kindEmoji(u.kind)} ${u.kind} · ${AiCoach.providerLabel(u.provider)}", fontSize = 13.sp)
+                                Text("${dateFmt.format(u.time.toLocalDate())} ${timeFmt.format(java.time.Instant.ofEpochMilli(u.time))}",
+                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(if (u.costUsd > 0) "~${(u.costUsd * 1450).toInt()}원" else "무료", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        )
+    }
 
     if (hiddenDialog) {
         val hiddenList = state.workouts.filter { it.id in hidden }.sortedByDescending { it.id }

@@ -7,6 +7,9 @@ import org.json.JSONObject
 /** 저장된 코칭 한 건 (운동별/하루/이번달/라이브 공통) */
 data class CoachLog(val time: Long, val kind: String, val title: String, val text: String)
 
+/** AI 호출 1건의 사용 내역 (언제·무엇·제공사·예상비용USD) */
+data class UsageLog(val time: Long, val kind: String, val provider: String, val costUsd: Double)
+
 /** API 키·코칭 기록·메모를 기기에 저장 */
 class CoachStore(context: Context) {
     private val prefs = context.getSharedPreferences("running_coach", Context.MODE_PRIVATE)
@@ -78,6 +81,26 @@ class CoachStore(context: Context) {
         prefs.edit().putString("chat_thread", arr.toString()).apply()
     }
     fun clearChat() = prefs.edit().remove("chat_thread").apply()
+
+    /** AI 사용 내역 (최신순, 최대 300건) */
+    fun usageLogs(): List<UsageLog> {
+        val s = prefs.getString("usage_log", "") ?: ""
+        if (s.isBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                UsageLog(o.getLong("t"), o.getString("k"), o.optString("p", ""), o.getDouble("c"))
+            }.sortedByDescending { it.time }
+        } catch (e: Exception) { emptyList() }
+    }
+    fun addUsage(kind: String, provider: String, costUsd: Double) {
+        val cur = usageLogs().toMutableList()
+        cur.add(0, UsageLog(System.currentTimeMillis(), kind, provider, costUsd))
+        val arr = JSONArray()
+        cur.take(300).forEach { arr.put(JSONObject().put("t", it.time).put("k", it.kind).put("p", it.provider).put("c", it.costUsd)) }
+        prefs.edit().putString("usage_log", arr.toString()).apply()
+    }
 
     /** 운동별 코칭 결과 */
     fun getCoaching(id: Long): String? = prefs.getString("coach_$id", null)
