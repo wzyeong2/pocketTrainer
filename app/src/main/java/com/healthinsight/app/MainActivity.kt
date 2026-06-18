@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
                                 onSend = ::sendChatThread,
                                 onBackfill = ::backfill,
                                 backfillInfo = ::backfillInfo,
-                                todaySummary = ::todayWorkoutSummary,
+                                periodSummary = ::periodWorkoutSummary,
                             )
                             else -> MainScreen(
                                 state = ui.value,
@@ -390,12 +390,14 @@ class MainActivity : ComponentActivity() {
         return sb.toString()
     }
 
-    /** 오늘 운동 요약 (코치챗 첨부용). 없으면 빈 문자열 */
-    private fun todayWorkoutSummary(): String {
-        val today = LocalDate.now()
-        val ws = ui.value.workouts.filter { it.id.toLocalDate() == today }.sortedBy { it.start }
-        if (ws.isEmpty()) return ""
-        return ws.joinToString("\n") { "• " + CoachPrompt.summarize(it).replace("\n", " ").trim() }
+    /** 최근 N일 러닝 요약 (코치챗 기간 분석용). 없으면 빈 문자열 */
+    private fun periodWorkoutSummary(days: Int): String {
+        val from = LocalDate.now().minusDays((days - 1).toLong())
+        val runs = ui.value.workouts.filter {
+            it.type == ExerciseType.RUNNING && !it.id.toLocalDate().isBefore(from)
+        }.sortedBy { it.start }
+        if (runs.isEmpty()) return ""
+        return runs.joinToString("\n") { runLine(it) }
     }
 
     /** AI 호출 1건의 예상 비용을 사용 내역에 기록 */

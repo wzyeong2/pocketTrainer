@@ -24,17 +24,29 @@ fun CoachChatScreen(
     onSend: ((Result<String>) -> Unit) -> Unit,
     onBackfill: ((Result<String>) -> Unit) -> Unit,
     backfillInfo: () -> Triple<Int, Int, Double>,
-    todaySummary: () -> String,
+    periodSummary: (Int) -> String,
 ) {
     var messages by remember { mutableStateOf(store.chatMessages()) }
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var costDialog by remember { mutableStateOf(false) }
     var resetDialog by remember { mutableStateOf(false) }
+    var periodDialog by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val scroll = rememberScrollState()
     LaunchedEffect(messages.size, loading) { scroll.animateScrollTo(scroll.maxValue) }
     BackHandler { onClose() }
+
+    // 사용자 메시지를 넣고 스레드를 보내는 공통 동작
+    fun ask(userMsg: String) {
+        store.addChatMessage("user", userMsg); messages = store.chatMessages(); loading = true
+        onSend { r ->
+            loading = false
+            r.onSuccess { store.addChatMessage("assistant", it) }
+                .onFailure { store.addChatMessage("assistant", "오류: ${it.message}") }
+            messages = store.chatMessages()
+        }
+    }
 
     Column(Modifier.fillMaxSize().imePadding().padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -54,22 +66,9 @@ fun CoachChatScreen(
                     maxLines = 1
                 )
             }
-            OutlinedButton(
-                onClick = {
-                    if (loading) return@OutlinedButton
-                    val t = todaySummary()
-                    val msg = if (t.isBlank()) "오늘 운동 기록이 없는데, 오늘 뭘 하면 좋을지 알려줘."
-                    else "오늘 내 기록이야:\n$t\n이 기록 기준으로 7단계로 분석해줘."
-                    store.addChatMessage("user", msg); messages = store.chatMessages(); loading = true
-                    onSend { r ->
-                        loading = false
-                        r.onSuccess { store.addChatMessage("assistant", it) }
-                            .onFailure { store.addChatMessage("assistant", "오류: ${it.message}") }
-                        messages = store.chatMessages()
-                    }
-                },
-                enabled = !loading, modifier = Modifier.weight(1f)
-            ) { Text("📎 오늘 기록 분석", maxLines = 1) }
+            OutlinedButton(onClick = { if (!loading) periodDialog = true }, enabled = !loading, modifier = Modifier.weight(1f)) {
+                Text("📎 기간 분석", maxLines = 1)
+            }
         }
 
         SelectionContainer(Modifier.weight(1f)) {
@@ -117,18 +116,39 @@ fun CoachChatScreen(
                 onClick = {
                     val text = input.trim()
                     if (text.isEmpty() || loading) return@Button
-                    store.addChatMessage("user", text); messages = store.chatMessages(); input = ""
-                    loading = true
-                    onSend { r ->
-                        loading = false
-                        r.onSuccess { store.addChatMessage("assistant", it) }
-                            .onFailure { store.addChatMessage("assistant", "오류: ${it.message}") }
-                        messages = store.chatMessages()
-                    }
+                    input = ""; ask(text)
                 },
                 enabled = !loading
             ) { Text("전송") }
         }
+    }
+
+    if (periodDialog) {
+        AlertDialog(
+            onDismissRequest = { periodDialog = false },
+            confirmButton = {},
+            dismissButton = { TextButton({ periodDialog = false }) { Text("취소") } },
+            title = { Text("기간 분석") },
+            text = {
+                Column {
+                    Text("선택한 기간의 러닝을 코치가 분류(이지/고도런/기록주 등)하고 유사 런끼리 묶어 변화 흐름을 분석해요.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(6.dp))
+                    listOf("오늘" to 1, "최근 1주" to 7, "최근 2주" to 14, "최근 1개월" to 30, "최근 3개월" to 90).forEach { (label, days) ->
+                        TextButton(
+                            onClick = {
+                                periodDialog = false
+                                val list = periodSummary(days)
+                                val msg = if (list.isBlank()) "$label 러닝 기록이 없는데, 앞으로 뭘 하면 좋을지 알려줘."
+                                else "[$label 러닝 기록]\n$list\n\n각 런을 분류(회복/이지/이지상단/보통/템포/기록주/고도런)하고, 유사한 런끼리 묶고, 이 기간의 변화 흐름(페이스·심박효율·거리·고도 추세)을 수치로 분석한 뒤 다음 방향을 제안해줘."
+                                ask(msg)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(label, modifier = Modifier.fillMaxWidth()) }
+                    }
+                }
+            }
+        )
     }
 
     if (resetDialog) {
