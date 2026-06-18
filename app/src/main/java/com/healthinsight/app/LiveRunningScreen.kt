@@ -320,7 +320,7 @@ private fun FinishedView(
         if (coachLoading) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
         Text("💪 이 달리기 전체 코칭 받기")
     }
-    summaryCoach?.let { Card(Modifier.fillMaxWidth()) { MarkdownText(it, Modifier.padding(14.dp), baseSize = 14.sp) } }
+    summaryCoach?.let { Card(Modifier.fillMaxWidth()) { CopyableMarkdown(it, Modifier.padding(14.dp), baseSize = 14.sp) } }
     OutlinedButton(onCloseClick, Modifier.fillMaxWidth()) { Text("닫기") }
 }
 

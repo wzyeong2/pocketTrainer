@@ -637,11 +637,16 @@ fun MainScreen(
             val recommended = AiCoach.recommendSessions(runsLast21)
             var sessionCount by remember(recommended) { mutableStateOf(recommended) }
             var countMenuOpen by remember { mutableStateOf(false) }
+            var programCardOpen by remember { mutableStateOf(false) }
             Card { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📋 AI 주간 프로그램", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth().clickableNoRipple { programCardOpen = !programCardOpen },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("📋 AI 주간 프로그램" + if (!programCardOpen && program.isNotEmpty()) " (${program.size}세션)" else "",
+                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     if (programLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(if (programCardOpen) "접기 ▲" else "펼치기 ▼", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                 }
+                if (programCardOpen) {
                 // 횟수 추천 + 드롭다운으로 변경
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("최근 훈련량 기준 AI 추천: ${recommended}회/주", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
@@ -694,6 +699,7 @@ fun MainScreen(
                 }, enabled = !programLoading, modifier = Modifier.fillMaxWidth()) {
                     Text(if (program.isEmpty()) "✨ 이번 주 프로그램 만들기" else "🔄 프로그램 새로 만들기")
                 }
+                } // if (programCardOpen)
             } }
         }
 
@@ -808,7 +814,7 @@ fun MainScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     if (dailyLoading) ElapsedProgressBar(expectedSec = 12, label = "코치가 종합 분석 중")
-                    else MarkdownText(dailyText ?: "", baseSize = 14.sp)
+                    else CopyableMarkdown(dailyText ?: "", baseSize = 14.sp)
                 }
             }
         )
@@ -850,7 +856,7 @@ fun MainScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     if (monthLoading) ElapsedProgressBar(expectedSec = 14, label = "코치가 한 달 분석 중")
-                    else MarkdownText(monthText ?: "", baseSize = 14.sp)
+                    else CopyableMarkdown(monthText ?: "", baseSize = 14.sp)
                 }
             }
         )
@@ -871,7 +877,8 @@ private fun pairKey(a: WorkoutRecord, b: WorkoutRecord): String =
 private fun detectDuplicates(list: List<WorkoutRecord>, resolved: Set<String>): List<Pair<WorkoutRecord, WorkoutRecord>> {
     val out = mutableListOf<Pair<WorkoutRecord, WorkoutRecord>>()
     list.groupBy { it.type }.forEach { (_, g) ->
-        val s = g.sortedBy { it.start }
+        // 라이브 코치 기록은 중복 검사에서 제외 (삼성헬스와 같이 떠도 강제로 지우라고 안 함)
+        val s = g.filterNot { it.source.contains("라이브") }.sortedBy { it.start }
         for (i in 0 until s.size - 1) {
             val a = s[i]; val b = s[i + 1]
             if (kotlin.math.abs(a.start.epochSecond - b.start.epochSecond) <= 300) {
@@ -1143,7 +1150,7 @@ private fun WorkoutDetail(
         )
         coaching?.let {
             HorizontalDivider()
-            MarkdownText(it, baseSize = 15.sp)
+            CopyableMarkdown(it, baseSize = 15.sp)
         }
 
         HorizontalDivider()
@@ -1454,7 +1461,7 @@ private fun CoachHistoryDialog(logs: List<CoachLog>, onClose: () -> Unit) {
                                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (open) {
                                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                                MarkdownText(log.text, baseSize = 13.sp)
+                                CopyableMarkdown(log.text, baseSize = 13.sp)
                             } else {
                                 Text(log.text.replace("\n", " ").replace("#", "").replace("*", "").trim().take(50) + "…",
                                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
