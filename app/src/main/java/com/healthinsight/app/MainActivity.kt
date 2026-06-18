@@ -171,6 +171,7 @@ class MainActivity : ComponentActivity() {
                                 onSend = ::sendChatThread,
                                 onBackfill = ::backfill,
                                 backfillInfo = ::backfillInfo,
+                                todaySummary = ::todayWorkoutSummary,
                             )
                             else -> MainScreen(
                                 state = ui.value,
@@ -387,6 +388,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         return sb.toString()
+    }
+
+    /** 오늘 운동 요약 (코치챗 첨부용). 없으면 빈 문자열 */
+    private fun todayWorkoutSummary(): String {
+        val today = LocalDate.now()
+        val ws = ui.value.workouts.filter { it.id.toLocalDate() == today }.sortedBy { it.start }
+        if (ws.isEmpty()) return ""
+        return ws.joinToString("\n") { "• " + CoachPrompt.summarize(it).replace("\n", " ").trim() }
     }
 
     /** AI 호출 1건의 예상 비용을 사용 내역에 기록 */

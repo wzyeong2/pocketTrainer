@@ -134,10 +134,6 @@ class WorkoutRepository(private val context: Context) {
 
     private suspend fun toRecord(session: ExerciseSessionRecord, type: ExerciseType): WorkoutRecord {
         val filter = TimeRangeFilter.between(session.startTime, session.endTime)
-        // 집계를 '이 운동을 기록한 앱 하나'로 제한 → 삼성헬스+구글핏 등 다중 소스가
-        // 같은 구간을 이중 기록해도 거리·고도·칼로리가 합산(중복)되지 않게.
-        val pkg = session.metadata.dataOrigin.packageName
-        val originFilter = if (pkg.isNotBlank()) setOf(DataOrigin(pkg)) else emptySet()
         // 총 경과시간(출발~도착). 삼성헬스의 '활동시간'(일시정지 제외)은 Health Connect로
         // 일관되게 넘어오지 않아 재현 불가 → 일관성을 위해 총 경과시간 사용.
         val durationSec = Duration.between(session.startTime, session.endTime).seconds
@@ -146,8 +142,7 @@ class WorkoutRepository(private val context: Context) {
         var distance = 0.0; var avgHr: Int? = null; var maxHr: Int? = null
         try {
             val core = client.aggregate(AggregateRequest(
-                setOf(DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX),
-                filter, dataOriginFilter = originFilter))
+                setOf(DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX), filter))
             distance = core[DistanceRecord.DISTANCE_TOTAL]?.inMeters ?: 0.0
             avgHr = core[HeartRateRecord.BPM_AVG]?.toInt()
             maxHr = core[HeartRateRecord.BPM_MAX]?.toInt()
@@ -159,7 +154,7 @@ class WorkoutRepository(private val context: Context) {
             val opt = client.aggregate(AggregateRequest(setOf(
                 TotalCaloriesBurnedRecord.ENERGY_TOTAL, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
                 ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL,
-                SpeedRecord.SPEED_MAX), filter, dataOriginFilter = originFilter))
+                SpeedRecord.SPEED_MAX), filter))
             calories = opt[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
                 ?: opt[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
             elevation = opt[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters

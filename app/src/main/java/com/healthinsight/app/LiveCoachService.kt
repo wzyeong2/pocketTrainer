@@ -70,6 +70,9 @@ object LiveCoach {
     var hasBaro by mutableStateOf(false)
     var gradePct by mutableStateOf(0)      // 현재 경사도 %
     var elevGainM by mutableStateOf(0.0)   // 누적 상승고도 m
+
+    // 라이브 타임라인: 음성 코칭 시점 + 심박/페이스/경사 샘플 (사후 AI 분석용)
+    var timeline by mutableStateOf<List<String>>(emptyList())
 }
 
 /**
@@ -101,6 +104,11 @@ class LiveCoachService : Service() {
     private var altRef = 0.0            // 누적 상승고도 계산용 기준점
     private val gradeWindow = ArrayDeque<Pair<Double, Double>>()  // (수평거리m, 고도m)
     private var lastGradeCueMs = 0L
+    private var lastSampleSec = 0L      // 타임라인 샘플 주기
+
+    private fun addTimeline(s: String) {
+        if (LiveCoach.timeline.size < 150) LiveCoach.timeline = LiveCoach.timeline + s
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -126,6 +134,7 @@ class LiveCoachService : Service() {
         goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
         hrOver = false; lastHrAlertMs = 0L
         altInit = false; curAlt = 0.0; altRef = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
+        lastSampleSec = 0L; LiveCoach.timeline = emptyList()
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -196,6 +205,13 @@ class LiveCoachService : Service() {
             val base = "${km}킬로미터 통과! 스플릿 ${mmss(split)}"
             LiveCoach.cue = "✅ $base"; speak(base)
             if (LiveCoach.aiOn) aiCheer(km)
+        }
+        // 타임라인 샘플 (45초마다 심박/페이스/경사)
+        if (LiveCoach.elapsedSec - lastSampleSec >= 45 && LiveCoach.distM > 0) {
+            lastSampleSec = LiveCoach.elapsedSec
+            val hr = BleHeart.bpm?.let { " 심박$it" } ?: ""
+            val gr = if (LiveCoach.hasBaro && LiveCoach.gradePct != 0) " 경사${LiveCoach.gradePct}%" else ""
+            addTimeline("${fmtDur(LiveCoach.elapsedSec)} ${"%.2f".format(LiveCoach.distM / 1000)}km 페이스${mmss(LiveCoach.curPace)}$hr$gr")
         }
         handleAltitude(now)
         handleGoal(now)
@@ -428,6 +444,7 @@ class LiveCoachService : Service() {
     }
 
     private fun speak(s: String) {
+        addTimeline("${fmtDur(LiveCoach.elapsedSec)} [코칭]${BleHeart.bpm?.let { " 심박$it" } ?: ""}: $s")
         if (!LiveCoach.voice) return
         // 음성은 이모지·기호 제거 (TTS가 "체크 표시" 같이 읽는 것 방지)
         val clean = s.replace(Regex("[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9 .,!?~:/%-]"), " ")

@@ -81,6 +81,12 @@ fun LiveRunningScreen(
                         if (store.athleteProfile.isNotBlank()) sb.append("[내 프로필] ${store.athleteProfile}\n")
                         sb.append("[방금 라이브 러닝] 거리 ${"%.2f".format(km)}km, 시간 ${mmss(sec.toInt())}, 평균 페이스 ${mmss(pace)}\n")
                         BleHeart.bpm?.let { sb.append("[종료 시 심박] ${it}bpm\n") }
+                        if (LiveCoach.elevGainM > 0) sb.append("[누적 상승고도] ${"%.0f".format(LiveCoach.elevGainM)}m (폰 기압계)\n")
+                        if (LiveCoach.timeline.isNotEmpty()) {
+                            sb.append("\n[라이브 타임라인 — 음성 코칭 시점·심박·페이스·경사 변화]\n")
+                            LiveCoach.timeline.forEach { sb.append(it).append("\n") }
+                            sb.append("위 타임라인으로 '언제 음성 코칭이 나갔고, 그에 따라 페이스·심박이 어떻게 변했는지'를 구체적으로 분석에 반영해줘.\n")
+                        }
                         if (LiveCoach.goalType == "program" && LiveCoach.programSegments.isNotEmpty()) {
                             sb.append("\n[처방됐던 세션] ${LiveCoach.programTitle}\n")
                             LiveCoach.programSegments.forEach { s ->

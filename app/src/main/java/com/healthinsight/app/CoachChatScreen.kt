@@ -24,6 +24,7 @@ fun CoachChatScreen(
     onSend: ((Result<String>) -> Unit) -> Unit,
     onBackfill: ((Result<String>) -> Unit) -> Unit,
     backfillInfo: () -> Triple<Int, Int, Double>,
+    todaySummary: () -> String,
 ) {
     var messages by remember { mutableStateOf(store.chatMessages()) }
     var input by remember { mutableStateOf("") }
@@ -45,11 +46,30 @@ fun CoachChatScreen(
         }
 
         val info = backfillInfo()
-        OutlinedButton(onClick = { if (info.first > 0) costDialog = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                if (info.first > 0) "📊 과거 기록 분석 (${store.backfillMonths}~${store.backfillMonths + 3}개월 전 · ${info.first}개)"
-                else "📊 더 분석할 과거 기록 없음"
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { if (info.first > 0) costDialog = true }, enabled = !loading, modifier = Modifier.weight(1f)) {
+                Text(
+                    if (info.first > 0) "📊 과거 ${store.backfillMonths + 3}개월 분석 (${info.first})"
+                    else "📊 분석할 과거 없음",
+                    maxLines = 1
+                )
+            }
+            OutlinedButton(
+                onClick = {
+                    if (loading) return@OutlinedButton
+                    val t = todaySummary()
+                    val msg = if (t.isBlank()) "오늘 운동 기록이 없는데, 오늘 뭘 하면 좋을지 알려줘."
+                    else "오늘 내 기록이야:\n$t\n이 기록 기준으로 7단계로 분석해줘."
+                    store.addChatMessage("user", msg); messages = store.chatMessages(); loading = true
+                    onSend { r ->
+                        loading = false
+                        r.onSuccess { store.addChatMessage("assistant", it) }
+                            .onFailure { store.addChatMessage("assistant", "오류: ${it.message}") }
+                        messages = store.chatMessages()
+                    }
+                },
+                enabled = !loading, modifier = Modifier.weight(1f)
+            ) { Text("📎 오늘 기록 분석", maxLines = 1) }
         }
 
         SelectionContainer(Modifier.weight(1f)) {
