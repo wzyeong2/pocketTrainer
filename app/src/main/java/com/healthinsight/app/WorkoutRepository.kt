@@ -139,33 +139,37 @@ class WorkoutRepository(private val context: Context) {
         val durationSec = Duration.between(session.startTime, session.endTime).seconds
 
         // 집계 전략: 먼저 '이 운동을 기록한 앱' 기준(다중 소스 이중 합산 방지),
-        // 그 앱에 핵심 값이 없으면 전체 소스로 보충(거리·고도가 다른 앱에만 있는 경우).
+        // 그 앱에 핵심 값이 없으면 전체 소스로 보충. 요청은 2개로 분리(합치면 전체 실패 위험).
         val pkg = session.metadata.dataOrigin.packageName
         val originFilter = if (pkg.isNotBlank()) setOf(DataOrigin(pkg)) else emptySet()
-        val metrics = setOf(
-            DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX,
+        val canFilter = originFilter.isNotEmpty()
+
+        // --- core: 거리 + 심박 ---
+        val coreMetrics = setOf(DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX)
+        val coreOwn = try { client.aggregate(AggregateRequest(coreMetrics, filter, dataOriginFilter = originFilter)) } catch (_: Exception) { null }
+        val coreAll = if (canFilter && (coreOwn == null || (coreOwn[DistanceRecord.DISTANCE_TOTAL] == null && coreOwn[HeartRateRecord.BPM_AVG] == null)))
+            try { client.aggregate(AggregateRequest(coreMetrics, filter)) } catch (_: Exception) { null } else null
+        val distance = (coreOwn?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters?.takeIf { it > 0 })
+            ?: (coreAll?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters ?: 0.0)
+        val avgHr = (coreOwn?.get(HeartRateRecord.BPM_AVG) ?: coreAll?.get(HeartRateRecord.BPM_AVG))?.toInt()
+        val maxHr = (coreOwn?.get(HeartRateRecord.BPM_MAX) ?: coreAll?.get(HeartRateRecord.BPM_MAX))?.toInt()
+
+        // --- opt: 칼로리/고도/걸음/최고속도 ---
+        val optMetrics = setOf(
             TotalCaloriesBurnedRecord.ENERGY_TOTAL, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
             ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL, SpeedRecord.SPEED_MAX,
         )
-        val own = try { client.aggregate(AggregateRequest(metrics, filter, dataOriginFilter = originFilter)) } catch (_: Exception) { null }
-        val needAll = own == null ||
-            (own[DistanceRecord.DISTANCE_TOTAL] == null && own[HeartRateRecord.BPM_AVG] == null &&
-                own[ElevationGainedRecord.ELEVATION_GAINED_TOTAL] == null)
-        val all = if (needAll && originFilter.isNotEmpty())
-            try { client.aggregate(AggregateRequest(metrics, filter)) } catch (_: Exception) { null } else null
-
-        val distance = (own?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters?.takeIf { it > 0 })
-            ?: (all?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters ?: 0.0)
-        val avgHr = (own?.get(HeartRateRecord.BPM_AVG) ?: all?.get(HeartRateRecord.BPM_AVG))?.toInt()
-        val maxHr = (own?.get(HeartRateRecord.BPM_MAX) ?: all?.get(HeartRateRecord.BPM_MAX))?.toInt()
-        val calories = own?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
-            ?: own?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
-            ?: all?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
-            ?: all?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
-        val elevation = own?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
-            ?: all?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
-        val steps = own?.get(StepsRecord.COUNT_TOTAL) ?: all?.get(StepsRecord.COUNT_TOTAL)
-        val maxSpeed = own?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond ?: all?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond
+        val optOwn = try { client.aggregate(AggregateRequest(optMetrics, filter, dataOriginFilter = originFilter)) } catch (_: Exception) { null }
+        val optAll = if (canFilter && (optOwn == null || (optOwn[ElevationGainedRecord.ELEVATION_GAINED_TOTAL] == null && optOwn[TotalCaloriesBurnedRecord.ENERGY_TOTAL] == null && optOwn[StepsRecord.COUNT_TOTAL] == null)))
+            try { client.aggregate(AggregateRequest(optMetrics, filter)) } catch (_: Exception) { null } else null
+        val calories = optOwn?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
+            ?: optOwn?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
+            ?: optAll?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
+            ?: optAll?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
+        val elevation = optOwn?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
+            ?: optAll?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
+        val steps = optOwn?.get(StepsRecord.COUNT_TOTAL) ?: optAll?.get(StepsRecord.COUNT_TOTAL)
+        val maxSpeed = optOwn?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond ?: optAll?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond
 
         return WorkoutRecord(
             type = type,

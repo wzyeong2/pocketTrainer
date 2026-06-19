@@ -11,8 +11,8 @@ android {
         applicationId = "com.exercisecoach.runapp"
         minSdk = 28
         targetSdk = 34
-        versionCode = 51
-        versionName = "0.51"
+        versionCode = 52
+        versionName = "0.52"
     }
 
     buildTypes {
@@ -52,7 +52,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Health Connect — 삼성 헬스 데이터를 읽는 핵심 라이브러리
+    // Health Connect - 삼성 헬스 데이터를 읽는 핵심 라이브러리
     implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 
     // 백그라운드 자동 감지
