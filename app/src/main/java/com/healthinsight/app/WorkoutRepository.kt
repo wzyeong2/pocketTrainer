@@ -11,7 +11,6 @@ import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
-import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
@@ -138,39 +137,29 @@ class WorkoutRepository(private val context: Context) {
         // 일관되게 넘어오지 않아 재현 불가 → 일관성을 위해 총 경과시간 사용.
         val durationSec = Duration.between(session.startTime, session.endTime).seconds
 
-        // 집계 전략: 먼저 '이 운동을 기록한 앱' 기준(다중 소스 이중 합산 방지),
-        // 그 앱에 핵심 값이 없으면 전체 소스로 보충. 요청은 2개로 분리(합치면 전체 실패 위험).
-        val pkg = session.metadata.dataOrigin.packageName
-        val originFilter = if (pkg.isNotBlank()) setOf(DataOrigin(pkg)) else emptySet()
-        val canFilter = originFilter.isNotEmpty()
+        // 집계는 Health Connect 기본 동작에 맡긴다 — 사용자가 설정한 데이터 소스 우선순위로
+        // 중복(삼성/구글핏/S26)이 자동 제거된다. 직접 필터로 합산하면 오히려 이중계산됨.
+        var distance = 0.0; var avgHr: Int? = null; var maxHr: Int? = null
+        try {
+            val core = client.aggregate(AggregateRequest(
+                setOf(DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX), filter))
+            distance = core[DistanceRecord.DISTANCE_TOTAL]?.inMeters ?: 0.0
+            avgHr = core[HeartRateRecord.BPM_AVG]?.toInt()
+            maxHr = core[HeartRateRecord.BPM_MAX]?.toInt()
+        } catch (_: Exception) {}
 
-        // --- core: 거리 + 심박 ---
-        val coreMetrics = setOf(DistanceRecord.DISTANCE_TOTAL, HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MAX)
-        val coreOwn = try { client.aggregate(AggregateRequest(coreMetrics, filter, dataOriginFilter = originFilter)) } catch (_: Exception) { null }
-        val coreAll = if (canFilter && (coreOwn == null || (coreOwn[DistanceRecord.DISTANCE_TOTAL] == null && coreOwn[HeartRateRecord.BPM_AVG] == null)))
-            try { client.aggregate(AggregateRequest(coreMetrics, filter)) } catch (_: Exception) { null } else null
-        val distance = (coreOwn?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters?.takeIf { it > 0 })
-            ?: (coreAll?.get(DistanceRecord.DISTANCE_TOTAL)?.inMeters ?: 0.0)
-        val avgHr = (coreOwn?.get(HeartRateRecord.BPM_AVG) ?: coreAll?.get(HeartRateRecord.BPM_AVG))?.toInt()
-        val maxHr = (coreOwn?.get(HeartRateRecord.BPM_MAX) ?: coreAll?.get(HeartRateRecord.BPM_MAX))?.toInt()
-
-        // --- opt: 칼로리/고도/걸음/최고속도 ---
-        val optMetrics = setOf(
-            TotalCaloriesBurnedRecord.ENERGY_TOTAL, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
-            ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL, SpeedRecord.SPEED_MAX,
-        )
-        val optOwn = try { client.aggregate(AggregateRequest(optMetrics, filter, dataOriginFilter = originFilter)) } catch (_: Exception) { null }
-        val optAll = if (canFilter && (optOwn == null || (optOwn[ElevationGainedRecord.ELEVATION_GAINED_TOTAL] == null && optOwn[TotalCaloriesBurnedRecord.ENERGY_TOTAL] == null && optOwn[StepsRecord.COUNT_TOTAL] == null)))
-            try { client.aggregate(AggregateRequest(optMetrics, filter)) } catch (_: Exception) { null } else null
-        val calories = optOwn?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
-            ?: optOwn?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
-            ?: optAll?.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.inKilocalories
-            ?: optAll?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories
-        val elevation = optOwn?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
-            ?: optAll?.get(ElevationGainedRecord.ELEVATION_GAINED_TOTAL)?.inMeters
-        val steps = optOwn?.get(StepsRecord.COUNT_TOTAL) ?: optAll?.get(StepsRecord.COUNT_TOTAL)
-        val maxSpeed = optOwn?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond ?: optAll?.get(SpeedRecord.SPEED_MAX)?.inMetersPerSecond
-
+        var calories: Double? = null; var elevation: Double? = null; var steps: Long? = null
+        var maxSpeed: Double? = null
+        try {
+            val opt = client.aggregate(AggregateRequest(setOf(
+                TotalCaloriesBurnedRecord.ENERGY_TOTAL, ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+                ElevationGainedRecord.ELEVATION_GAINED_TOTAL, StepsRecord.COUNT_TOTAL, SpeedRecord.SPEED_MAX), filter))
+            calories = opt[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
+                ?: opt[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
+            elevation = opt[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
+            steps = opt[StepsRecord.COUNT_TOTAL]
+            maxSpeed = opt[SpeedRecord.SPEED_MAX]?.inMetersPerSecond
+        } catch (_: Exception) {}
         return WorkoutRecord(
             type = type,
             start = session.startTime,
