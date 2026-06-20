@@ -52,6 +52,7 @@ fun CoachChatScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("💬 코치챗", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row {
+                TextButton(onClick = { if (!loading) { store.clearChat(); messages = emptyList() } }) { Text("새 대화") }
                 TextButton(onClick = { resetDialog = true }) { Text("초기화") }
                 TextButton(onClick = onClose) { Text("닫기") }
             }
@@ -140,7 +141,12 @@ fun CoachChatScreen(
                                 periodDialog = false
                                 val list = periodSummary(days)
                                 val msg = if (list.isBlank()) "$label 러닝 기록이 없는데, 앞으로 뭘 하면 좋을지 알려줘."
-                                else "[$label 러닝 기록]\n$list\n\n각 런을 분류(회복/이지/이지상단/보통/템포/기록주/고도런)하고, 유사한 런끼리 묶고, 이 기간의 변화 흐름(페이스·심박효율·거리·고도 추세)을 수치로 분석한 뒤 다음 방향을 제안해줘."
+                                else "[$label 러닝 기록]\n$list\n\n아래를 빠짐없이 숫자 기반으로 깊게 분석해줘 (담백하게 말고 구체적으로, 충분히 길게):\n" +
+                                    "1. 각 런 분류(회복/이지/이지상단/보통/템포/기록주/고도런) — 페이스·심박·고도 근거와 함께\n" +
+                                    "2. 유사한 런끼리 그룹핑\n" +
+                                    "3. 기간 추세: 같은 강도·거리 대비 페이스·심박효율이 어떻게 변했는지 구체 수치로\n" +
+                                    "4. 잘하는 점 / 리스크(부상·과훈련·단조로움)\n" +
+                                    "5. 다음 1~2주 구체 처방(요일별 거리·페이스·심박)\n한 줄 요약으로 끝내지 말 것."
                                 ask(msg)
                             },
                             modifier = Modifier.fillMaxWidth()

@@ -107,7 +107,7 @@ object AiCoach {
     private fun chatOpenAi(apiKey: String, system: String, messages: List<Pair<String, String>>): String {
         val arr = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         messages.forEach { (r, c) -> arr.put(JSONObject().put("role", r).put("content", c)) }
-        val body = JSONObject().put("model", OPENAI_MODEL).put("max_tokens", 1200).put("messages", arr)
+        val body = JSONObject().put("model", OPENAI_MODEL).put("max_tokens", 2000).put("messages", arr)
         val (code, resp) = httpPost("https://api.openai.com/v1/chat/completions",
             mapOf("Authorization" to "Bearer $apiKey", "Content-Type" to "application/json"), body.toString())
         if (code !in 200..299) throw RuntimeException(parseError(resp, code))
@@ -117,7 +117,7 @@ object AiCoach {
     private fun chatClaude(apiKey: String, system: String, messages: List<Pair<String, String>>): String {
         val arr = JSONArray()
         messages.forEach { (r, c) -> arr.put(JSONObject().put("role", r).put("content", c)) }
-        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", 1200)
+        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", 2000)
             .put("system", system).put("messages", arr)
         val (code, resp) = httpPost("https://api.anthropic.com/v1/messages",
             mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01", "content-type" to "application/json"),
