@@ -160,7 +160,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onClose = {
                                     // 방금 저장된 라이브 기록이 바로 목록에 보이게 재병합
-                                    ui.value = ui.value.copy(workouts = withLive(ui.value.workouts))
+                                    ui.value = ui.value.copy(workouts = mergeLiveOnly(ui.value.workouts))
                                     screen.value = "main"
                                 },
                             )
@@ -228,15 +228,36 @@ class MainActivity : ComponentActivity() {
         val firstToday = store.lastSeenDate != today
         store.lastSeenDate = today
         if (cached.isNotEmpty()) {
-            ui.value = ui.value.copy(workouts = withLive(cached), loading = false, firstVisitToday = firstToday)
+            ui.value = ui.value.copy(workouts = mergeLiveOnly(cached), loading = false, firstVisitToday = firstToday)
         } else {
             loadAll() // 캐시 없음 → 최초 1회 자동 로드
         }
     }
 
-    /** Health Connect 기록 + 라이브 코치 로컬 기록을 합쳐 최신순으로 (id 중복 제거) */
-    private fun withLive(hc: List<WorkoutRecord>): List<WorkoutRecord> =
-        (hc + store.liveRuns()).distinctBy { it.id }.sortedByDescending { it.start }
+    /**
+     * Health Connect 기록 + 라이브 세션. 단, 삼성 기록과 시간이 겹치는 라이브 세션은
+     * 목록에 안 넣어(마일리지 중복 방지) 코칭 합치기용으로만 쓰고, 겹치는 삼성 기록이
+     * 없는(라이브만 뛴) 세션만 별도 기록으로 표시.
+     */
+    private fun mergeLiveOnly(hc: List<WorkoutRecord>): List<WorkoutRecord> {
+        val runs = hc.filter { it.type == ExerciseType.RUNNING }
+        val orphans = store.liveSessions().filter { ls ->
+            runs.none { it.start.toEpochMilli() < ls.end && ls.start < it.end.toEpochMilli() }
+        }.map { ls ->
+            WorkoutRecord(
+                type = ExerciseType.RUNNING,
+                start = java.time.Instant.ofEpochMilli(ls.start),
+                end = java.time.Instant.ofEpochMilli(ls.end),
+                durationSec = ls.durationSec,
+                distanceMeters = ls.distM,
+                avgHr = null, maxHr = ls.hrMax.takeIf { it > 0 },
+                calories = null, elevationGainM = ls.elevGainM.takeIf { it > 0 },
+                steps = null, maxSpeedMps = null,
+                splits = emptyList(), source = "라이브 코치", fromWatch = false,
+            )
+        }
+        return (hc + orphans).sortedByDescending { it.start }
+    }
 
     /** Health Connect에서 새로 읽어 캐시 갱신 (수동 '새 기록 불러오기' 전용) */
     private fun loadAll() {
@@ -247,7 +268,7 @@ class MainActivity : ComponentActivity() {
                 val ws = repo.allWorkouts(120)
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
-                val merged = withLive(ws)
+                val merged = mergeLiveOnly(ws)
                 val party = checkPersonalBest(merged)
                 ui.value = ui.value.copy(loading = false, workouts = merged, firstVisitToday = false, celebrate = party,
                     message = if (merged.isEmpty()) "최근 120일 운동 기록이 없어요. 운동하고 다시 불러오기 해보세요!" else null)
@@ -346,7 +367,19 @@ class MainActivity : ComponentActivity() {
         val image = capturedBitmap.value?.let { jpegBytes(it) }
         store.recordAiCall()
         lifecycleScope.launch {
-            val prompt = CoachPrompt.build(w, memo, profile, image != null)
+            val base = CoachPrompt.build(w, memo, profile, image != null)
+            // 같은 시간대 라이브 코치 세션이 있으면 상세(고도·경사·심박 타임라인)를 합침
+            val live = if (w.type == ExerciseType.RUNNING) store.liveSessionFor(w.start.toEpochMilli(), w.end.toEpochMilli()) else null
+            val prompt = if (live != null) buildString {
+                append(base)
+                append("\n\n[라이브 코치 동행 상세 — 폰 기압계·BLE 심박, 헬스커넥트보다 세밀]\n")
+                append("누적 상승고도 ${"%.0f".format(live.elevGainM)}m · 최대 경사 ${live.gradeMax}% · 최대 심박 ${live.hrMax}bpm\n")
+                if (live.timeline.isNotEmpty()) {
+                    append("타임라인(음성 코칭 시점·심박·페이스·경사):\n")
+                    live.timeline.forEach { append(it).append("\n") }
+                }
+                append("위 라이브 상세(특히 고도·경사 변화)를 삼성 거리 기록과 합쳐서, 후반 페이스 하락이 오르막 때문인지 등 '왜'를 정확히 해석해줘.\n")
+            } else base
             val r = AiCoach.generate(provider, key, prompt, image)
             r.onSuccess {
                 store.setCoaching(w.id, it)

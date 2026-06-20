@@ -105,6 +105,8 @@ class LiveCoachService : Service() {
     private val gradeWindow = ArrayDeque<Pair<Double, Double>>()  // (수평거리m, 고도m)
     private var lastGradeCueMs = 0L
     private var lastSampleSec = 0L      // 타임라인 샘플 주기
+    private var hrMaxSeen = 0
+    private var gradeMaxSeen = 0
 
     private fun addTimeline(s: String) {
         if (LiveCoach.timeline.size < 150) LiveCoach.timeline = LiveCoach.timeline + s
@@ -134,7 +136,7 @@ class LiveCoachService : Service() {
         goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
         hrOver = false; lastHrAlertMs = 0L
         altInit = false; curAlt = 0.0; altRef = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
-        lastSampleSec = 0L; LiveCoach.timeline = emptyList()
+        lastSampleSec = 0L; LiveCoach.timeline = emptyList(); hrMaxSeen = 0; gradeMaxSeen = 0
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -206,6 +208,8 @@ class LiveCoachService : Service() {
             LiveCoach.cue = "✅ $base"; speak(base)
             if (LiveCoach.aiOn) aiCheer(km)
         }
+        BleHeart.bpm?.let { if (it > hrMaxSeen) hrMaxSeen = it }
+        if (LiveCoach.gradePct > gradeMaxSeen) gradeMaxSeen = LiveCoach.gradePct
         // 타임라인 샘플 (45초마다 심박/페이스/경사)
         if (LiveCoach.elapsedSec - lastSampleSec >= 45 && LiveCoach.distM > 0) {
             lastSampleSec = LiveCoach.elapsedSec
@@ -408,23 +412,19 @@ class LiveCoachService : Service() {
         scope?.cancel(); scope = null
         val km = LiveCoach.distM / 1000
         LiveCoach.avgPace = if (km > 0) (LiveCoach.elapsedSec / km).roundToInt() else 0
-        // 실제 GPS 러닝이고 의미있는 거리·시간이면 로컬 기록으로 저장 (삼성헬스 자동기록처럼, 나중에 숨김 가능)
+        // 라이브 세션 상세(고도·경사·심박·타임라인) 저장 → 삼성 기록과 합쳐 코칭에 사용.
+        // 별도 운동 기록으로는 안 남겨서 마일리지 중복(뻥튀기) 방지.
         if (LiveCoach.mode == "gps" && LiveCoach.distM >= 100.0 && LiveCoach.elapsedSec >= 60) {
             try {
-                CoachStore(this).addLiveRun(
-                    WorkoutRecord(
-                        type = ExerciseType.RUNNING,
-                        start = java.time.Instant.ofEpochMilli(startTs),
-                        end = java.time.Instant.ofEpochMilli(System.currentTimeMillis()),
-                        durationSec = LiveCoach.elapsedSec,
-                        distanceMeters = LiveCoach.distM,
-                        avgHr = BleHeart.bpm,
-                        maxHr = null, calories = null,
-                        elevationGainM = LiveCoach.elevGainM.takeIf { it > 0 },
-                        steps = null, maxSpeedMps = null,
-                        splits = emptyList(),
-                        source = "라이브 코치",
-                        fromWatch = false,
+                CoachStore(this).addLiveSession(
+                    LiveSession(
+                        start = startTs,
+                        end = System.currentTimeMillis(),
+                        distM = LiveCoach.distM,
+                        elevGainM = LiveCoach.elevGainM,
+                        hrMax = hrMaxSeen,
+                        gradeMax = gradeMaxSeen,
+                        timeline = LiveCoach.timeline,
                     )
                 )
             } catch (_: Exception) {}

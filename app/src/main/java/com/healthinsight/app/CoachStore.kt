@@ -10,6 +10,16 @@ data class CoachLog(val time: Long, val kind: String, val title: String, val tex
 /** AI 호출 1건의 사용 내역 (언제·무엇·제공사·예상비용USD) */
 data class UsageLog(val time: Long, val kind: String, val provider: String, val costUsd: Double)
 
+/** 라이브 코치 세션 상세 (폰 기압계 고도·경사 + 심박·타임라인). 삼성 기록과 합쳐 코칭에 사용 */
+data class LiveSession(
+    val start: Long, val end: Long, val distM: Double, val elevGainM: Double,
+    val hrMax: Int, val gradeMax: Int, val timeline: List<String>,
+) {
+    val durationSec: Long get() = (end - start) / 1000
+    /** 같은 러닝인지 (시간대 겹침) */
+    fun overlaps(s: Long, e: Long): Boolean = start < e && s < end
+}
+
 /** API 키·코칭 기록·메모를 기기에 저장 */
 class CoachStore(context: Context) {
     private val prefs = context.getSharedPreferences("running_coach", Context.MODE_PRIVATE)
@@ -162,13 +172,35 @@ class CoachStore(context: Context) {
         get() = prefs.getString("live_runs", "") ?: ""
         set(v) = prefs.edit().putString("live_runs", v).apply()
 
-    fun liveRuns(): List<WorkoutRecord> = WorkoutCache.fromJson(liveRunsJson)
-
-    fun addLiveRun(rec: WorkoutRecord) {
-        val cur = WorkoutCache.fromJson(liveRunsJson).toMutableList()
-        cur.add(rec)
-        liveRunsJson = WorkoutCache.toJson(cur)
+    /** 라이브 코치 세션 상세 (고도·경사·심박 타임라인) */
+    fun liveSessions(): List<LiveSession> {
+        val s = prefs.getString("live_sessions", "") ?: ""
+        if (s.isBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val tl = o.optJSONArray("tl")
+                val timeline = if (tl != null) (0 until tl.length()).map { tl.getString(it) } else emptyList()
+                LiveSession(o.getLong("s"), o.getLong("e"), o.getDouble("d"), o.getDouble("el"),
+                    o.getInt("hr"), o.getInt("g"), timeline)
+            }
+        } catch (e: Exception) { emptyList() }
     }
+
+    fun addLiveSession(ls: LiveSession) {
+        val cur = liveSessions().toMutableList()
+        cur.add(ls)
+        val arr = JSONArray()
+        cur.takeLast(50).forEach { l ->
+            arr.put(JSONObject().put("s", l.start).put("e", l.end).put("d", l.distM).put("el", l.elevGainM)
+                .put("hr", l.hrMax).put("g", l.gradeMax).put("tl", JSONArray(l.timeline)))
+        }
+        prefs.edit().putString("live_sessions", arr.toString()).apply()
+    }
+
+    /** 주어진 시간대(운동)와 겹치는 라이브 세션 (코칭 합치기용) */
+    fun liveSessionFor(start: Long, end: Long): LiveSession? = liveSessions().firstOrNull { it.overlaps(start, end) }
 
     /** 앱을 마지막으로 연 날짜 — '오늘 첫 방문' 안내용 (fetch 여부와 무관) */
     var lastSeenDate: String
