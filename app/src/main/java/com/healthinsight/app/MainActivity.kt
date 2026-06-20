@@ -373,12 +373,13 @@ class MainActivity : ComponentActivity() {
             val prompt = if (live != null) buildString {
                 append(base)
                 append("\n\n[라이브 코치 동행 상세 — 폰 기압계·BLE 심박, 헬스커넥트보다 세밀]\n")
-                append("누적 상승고도 ${"%.0f".format(live.elevGainM)}m · 최대 경사 ${live.gradeMax}% · 최대 심박 ${live.hrMax}bpm\n")
+                append("총 오르막 +${"%.0f".format(live.elevGainM)}m · 총 내리막 -${"%.0f".format(live.elevLossM)}m · 최대 경사 ${live.gradeMax}% · 최대 심박 ${live.hrMax}bpm\n")
+                append("※ 순고도(오르막-내리막)로 보지 말 것. 총 오르막=심폐 부하, 총 내리막=근골격·제동 데미지(급경사 내리막은 심박은 풀려도 속도 못 냄). 순고도가 0이어도 둘 다 크면 실제 부담이 큼.\n")
                 if (live.timeline.isNotEmpty()) {
                     append("타임라인(음성 코칭 시점·심박·페이스·경사):\n")
                     live.timeline.forEach { append(it).append("\n") }
                 }
-                append("위 라이브 상세(특히 고도·경사 변화)를 삼성 거리 기록과 합쳐서, 후반 페이스 하락이 오르막 때문인지 등 '왜'를 정확히 해석해줘.\n")
+                append("위 라이브 상세(특히 오르막·내리막 분리)를 삼성 거리 기록과 합쳐서, 후반 페이스 하락이 오르막 때문인지·내리막 제동 때문인지 등 '왜'를 정확히 해석해줘.\n")
             } else base
             val r = AiCoach.generate(provider, key, prompt, image)
             r.onSuccess {

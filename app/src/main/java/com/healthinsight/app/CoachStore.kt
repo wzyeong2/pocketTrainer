@@ -12,7 +12,7 @@ data class UsageLog(val time: Long, val kind: String, val provider: String, val 
 
 /** 라이브 코치 세션 상세 (폰 기압계 고도·경사 + 심박·타임라인). 삼성 기록과 합쳐 코칭에 사용 */
 data class LiveSession(
-    val start: Long, val end: Long, val distM: Double, val elevGainM: Double,
+    val start: Long, val end: Long, val distM: Double, val elevGainM: Double, val elevLossM: Double,
     val hrMax: Int, val gradeMax: Int, val timeline: List<String>,
 ) {
     val durationSec: Long get() = (end - start) / 1000
@@ -182,7 +182,7 @@ class CoachStore(context: Context) {
                 val o = arr.getJSONObject(i)
                 val tl = o.optJSONArray("tl")
                 val timeline = if (tl != null) (0 until tl.length()).map { tl.getString(it) } else emptyList()
-                LiveSession(o.getLong("s"), o.getLong("e"), o.getDouble("d"), o.getDouble("el"),
+                LiveSession(o.getLong("s"), o.getLong("e"), o.getDouble("d"), o.getDouble("el"), o.optDouble("lo", 0.0),
                     o.getInt("hr"), o.getInt("g"), timeline)
             }
         } catch (e: Exception) { emptyList() }
@@ -193,7 +193,7 @@ class CoachStore(context: Context) {
         cur.add(ls)
         val arr = JSONArray()
         cur.takeLast(50).forEach { l ->
-            arr.put(JSONObject().put("s", l.start).put("e", l.end).put("d", l.distM).put("el", l.elevGainM)
+            arr.put(JSONObject().put("s", l.start).put("e", l.end).put("d", l.distM).put("el", l.elevGainM).put("lo", l.elevLossM)
                 .put("hr", l.hrMax).put("g", l.gradeMax).put("tl", JSONArray(l.timeline)))
         }
         prefs.edit().putString("live_sessions", arr.toString()).apply()

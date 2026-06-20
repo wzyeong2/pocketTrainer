@@ -81,7 +81,8 @@ fun LiveRunningScreen(
                         if (store.athleteProfile.isNotBlank()) sb.append("[내 프로필] ${store.athleteProfile}\n")
                         sb.append("[방금 라이브 러닝] 거리 ${"%.2f".format(km)}km, 시간 ${mmss(sec.toInt())}, 평균 페이스 ${mmss(pace)}\n")
                         BleHeart.bpm?.let { sb.append("[종료 시 심박] ${it}bpm\n") }
-                        if (LiveCoach.elevGainM > 0) sb.append("[누적 상승고도] ${"%.0f".format(LiveCoach.elevGainM)}m (폰 기압계)\n")
+                        if (LiveCoach.elevGainM > 0 || LiveCoach.elevLossM > 0)
+                            sb.append("[고도(폰 기압계)] 총 오르막 +${"%.0f".format(LiveCoach.elevGainM)}m, 총 내리막 -${"%.0f".format(LiveCoach.elevLossM)}m. 순고도로 보지 말고 오르막=심폐부하/내리막=근골격·제동 데미지로 따로 평가해.\n")
                         if (LiveCoach.timeline.isNotEmpty()) {
                             sb.append("\n[라이브 타임라인 — 음성 코칭 시점·심박·페이스·경사 변화]\n")
                             LiveCoach.timeline.forEach { sb.append(it).append("\n") }
@@ -272,7 +273,7 @@ private fun RunningView(context: android.content.Context) {
             )
         ) {
             Text(
-                "${if (g >= 4) "⛰️ 오르막" else if (g <= -4) "🏞️ 내리막" else "🛣️ 평지"}  경사 ${g}%   ·   📈 +${"%.0f".format(LiveCoach.elevGainM)}m",
+                "${if (g >= 4) "⛰️ 오르막" else if (g <= -4) "🏞️ 내리막" else "🛣️ 평지"}  경사 ${g}%   ·   📈 +${"%.0f".format(LiveCoach.elevGainM)}m / 📉 -${"%.0f".format(LiveCoach.elevLossM)}m",
                 Modifier.padding(14.dp), fontWeight = FontWeight.Bold, fontSize = 16.sp
             )
         }

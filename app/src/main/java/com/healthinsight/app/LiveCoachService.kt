@@ -69,7 +69,8 @@ object LiveCoach {
     // 실시간 고도·경사 (폰 기압계)
     var hasBaro by mutableStateOf(false)
     var gradePct by mutableStateOf(0)      // 현재 경사도 %
-    var elevGainM by mutableStateOf(0.0)   // 누적 상승고도 m
+    var elevGainM by mutableStateOf(0.0)   // 누적 상승고도 m (심폐 부하)
+    var elevLossM by mutableStateOf(0.0)   // 누적 하강고도 m (근골격·제동 부하)
 
     // 라이브 타임라인: 음성 코칭 시점 + 심박/페이스/경사 샘플 (사후 AI 분석용)
     var timeline by mutableStateOf<List<String>>(emptyList())
@@ -101,7 +102,8 @@ class LiveCoachService : Service() {
     private var baroListener: SensorEventListener? = null
     private var curAlt = 0.0            // 스무딩된 현재 고도(m)
     private var altInit = false
-    private var altRef = 0.0            // 누적 상승고도 계산용 기준점
+    private var altRef = 0.0            // 누적 상승 기준점(저점)
+    private var altRefDown = 0.0        // 누적 하강 기준점(고점)
     private val gradeWindow = ArrayDeque<Pair<Double, Double>>()  // (수평거리m, 고도m)
     private var lastGradeCueMs = 0L
     private var lastSampleSec = 0L      // 타임라인 샘플 주기
@@ -135,8 +137,9 @@ class LiveCoachService : Service() {
         lastCueMs = 0L; kmSplitSec = 0.0; lastLoc = null; window.clear()
         goalAnnounced = false; lastIntervalPhase = ""; lastProgSeg = -1; LiveCoach.intervalLabel = ""
         hrOver = false; lastHrAlertMs = 0L
-        altInit = false; curAlt = 0.0; altRef = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
+        altInit = false; curAlt = 0.0; altRef = 0.0; altRefDown = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
         lastSampleSec = 0L; LiveCoach.timeline = emptyList(); hrMaxSeen = 0; gradeMaxSeen = 0
+        LiveCoach.elevLossM = 0.0
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -174,7 +177,7 @@ class LiveCoachService : Service() {
         baroListener = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
                 val alt = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, e.values[0]).toDouble()
-                curAlt = if (!altInit) { altInit = true; altRef = alt; alt } else curAlt * 0.9 + alt * 0.1
+                curAlt = if (!altInit) { altInit = true; altRef = alt; altRefDown = alt; alt } else curAlt * 0.9 + alt * 0.1
             }
             override fun onAccuracyChanged(s: Sensor?, a: Int) {}
         }
@@ -225,9 +228,11 @@ class LiveCoachService : Service() {
     /** 실시간 고도/경사 계산 + 오르막·내리막 코칭 (GPS 모드 + 기압계) */
     private fun handleAltitude(now: Long) {
         if (LiveCoach.mode != "gps" || !altInit) return
-        // 누적 상승고도 (히스테리시스로 기압 노이즈 억제)
+        // 누적 상승/하강고도 (히스테리시스로 기압 노이즈 억제)
         if (curAlt >= altRef + 1.0) { LiveCoach.elevGainM += curAlt - altRef; altRef = curAlt }
         else if (curAlt < altRef) altRef = curAlt
+        if (curAlt <= altRefDown - 1.0) { LiveCoach.elevLossM += altRefDown - curAlt; altRefDown = curAlt }
+        else if (curAlt > altRefDown) altRefDown = curAlt
         // 실시간 경사: 최근 약 40m 수평거리 구간의 고도차 / 거리
         gradeWindow.addLast(LiveCoach.distM to curAlt)
         while (gradeWindow.size >= 2 && LiveCoach.distM - gradeWindow.first().first > 40.0) gradeWindow.removeFirst()
@@ -422,6 +427,7 @@ class LiveCoachService : Service() {
                         end = System.currentTimeMillis(),
                         distM = LiveCoach.distM,
                         elevGainM = LiveCoach.elevGainM,
+                        elevLossM = LiveCoach.elevLossM,
                         hrMax = hrMaxSeen,
                         gradeMax = gradeMaxSeen,
                         timeline = LiveCoach.timeline,
