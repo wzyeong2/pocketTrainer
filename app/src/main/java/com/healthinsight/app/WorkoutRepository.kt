@@ -6,6 +6,7 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
+import androidx.health.connect.client.records.ExerciseRouteResult
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.SpeedRecord
@@ -25,6 +26,9 @@ class WorkoutRepository(private val context: Context) {
     val client: HealthConnectClient by lazy { HealthConnectClient.getOrCreate(context) }
 
     companion object {
+        /** 모든 운동 경로(GPS 좌표) 읽기 권한 — 지도 고도 보정용 */
+        const val ROUTE_PERMISSION = "android.permission.health.READ_EXERCISE_ROUTES"
+
         /** 요청하는 전체 권한 (있으면 데이터가 더 풍부해짐) */
         val PERMISSIONS: Set<String> = setOf(
             HealthPermission.getReadPermission(ExerciseSessionRecord::class),
@@ -35,6 +39,7 @@ class WorkoutRepository(private val context: Context) {
             HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
             HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
             HealthPermission.getReadPermission(ElevationGainedRecord::class),
+            ROUTE_PERMISSION,
         )
 
         /** 연결 성공으로 간주하는 최소 핵심 권한 (운동·심박·거리·속도·걸음) */
@@ -51,6 +56,38 @@ class WorkoutRepository(private val context: Context) {
 
     suspend fun hasAllPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(REQUIRED)
+
+    suspend fun hasRoutePermission(): Boolean =
+        client.permissionController.getGrantedPermissions().contains(ROUTE_PERMISSION)
+
+    /** 세션의 GPS 경로 좌표(위도,경도) — 지도 고도 API 보정용. 없으면 빈 리스트 */
+    fun routeLatLng(session: ExerciseSessionRecord): List<Pair<Double, Double>> = try {
+        when (val rr = session.exerciseRouteResult) {
+            is ExerciseRouteResult.Data -> rr.exerciseRoute.route.map { it.latitude to it.longitude }
+            else -> emptyList()
+        }
+    } catch (e: Exception) { emptyList() }
+
+    /** 실험: 삼성이 GPS 경로를 헬스커넥트에 주는지 logcat으로 확인 (태그 ROUTEDBG) */
+    suspend fun debugRoutes(days: Long = 120) {
+        val sessions = readSessions(days).filter { it.exerciseType in ExerciseType.RUNNING.hcTypes }
+        android.util.Log.i("ROUTEDBG", "running=${sessions.size} routePerm=${hasRoutePermission()}")
+        sessions.sortedByDescending { it.startTime }.take(10).forEach { s ->
+            val msg = try {
+                when (val rr = s.exerciseRouteResult) {
+                    is ExerciseRouteResult.Data -> {
+                        val locs = rr.exerciseRoute.route
+                        val alt = locs.count { it.altitude != null }
+                        "Data pts=${locs.size} altPts=$alt"
+                    }
+                    is ExerciseRouteResult.ConsentRequired -> "ConsentRequired"
+                    is ExerciseRouteResult.NoData -> "NoData"
+                    else -> "?"
+                }
+            } catch (e: Exception) { "ERR ${e.message}" }
+            android.util.Log.i("ROUTEDBG", "${sourceLabel(s)} ${s.startTime}: $msg")
+        }
+    }
 
     /** 특정 종류의 최근 운동 목록 (최신순) */
     suspend fun recentWorkouts(type: ExerciseType, days: Long = 120): List<WorkoutRecord> {

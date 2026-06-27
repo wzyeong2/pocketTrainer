@@ -32,6 +32,7 @@
     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.READ_ELEVATION_GAINED" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
 
     <!-- Health Connect 앱(데이터 제공자)의 존재 여부 확인용 -->
     <queries>

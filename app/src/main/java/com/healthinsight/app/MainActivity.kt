@@ -209,7 +209,10 @@ class MainActivity : ComponentActivity() {
             HealthConnectClient.SDK_AVAILABLE -> lifecycleScope.launch {
                 val has = repo.hasAllPermissions()
                 ui.value = ui.value.copy(available = true, hasPermission = has)
-                if (has) loadCachedThenMaybeFetch()
+                if (has) {
+                    if (!repo.hasRoutePermission()) requestHc.launch(WorkoutRepository.PERMISSIONS) // 경로(고도 보정) 권한 추가 요청
+                    loadCachedThenMaybeFetch()
+                }
             }
             HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
                 ui.value = ui.value.copy(message = "Health Connect 업데이트가 필요해요.")
@@ -266,6 +269,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this@MainActivity, "최신 기록 불러오는 중...", Toast.LENGTH_SHORT).show()
             try {
                 val ws = repo.allWorkouts(120)
+                try { repo.debugRoutes(120) } catch (_: Exception) {} // 실험: 삼성 경로 제공 여부 logcat 확인
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
                 val merged = mergeLiveOnly(ws)
