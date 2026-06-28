@@ -68,25 +68,30 @@ class WorkoutRepository(private val context: Context) {
         }
     } catch (e: Exception) { emptyList() }
 
-    /** 실험: 삼성이 GPS 경로를 헬스커넥트에 주는지 logcat으로 확인 (태그 ROUTEDBG) */
+    /** 실험: 삼성이 GPS 경로를 헬스커넥트에 주는지 SharedPrefs(route_debug)에 기록 (삼성폰은 logcat이 막혀서) */
     suspend fun debugRoutes(days: Long = 120) {
-        val sessions = readSessions(days).filter { it.exerciseType in ExerciseType.RUNNING.hcTypes }
-        android.util.Log.i("ROUTEDBG", "running=${sessions.size} routePerm=${hasRoutePermission()}")
-        sessions.sortedByDescending { it.startTime }.take(10).forEach { s ->
-            val msg = try {
-                when (val rr = s.exerciseRouteResult) {
-                    is ExerciseRouteResult.Data -> {
-                        val locs = rr.exerciseRoute.route
-                        val alt = locs.count { it.altitude != null }
-                        "Data pts=${locs.size} altPts=$alt"
+        val sb = StringBuilder()
+        try {
+            val sessions = readSessions(days).filter { it.exerciseType in ExerciseType.RUNNING.hcTypes }
+            sb.append("running=${sessions.size} routePerm=${hasRoutePermission()}\n")
+            sessions.sortedByDescending { it.startTime }.take(10).forEach { s ->
+                val msg = try {
+                    when (val rr = s.exerciseRouteResult) {
+                        is ExerciseRouteResult.Data -> {
+                            val locs = rr.exerciseRoute.route
+                            val alt = locs.count { it.altitude != null }
+                            "Data pts=${locs.size} altPts=$alt"
+                        }
+                        is ExerciseRouteResult.ConsentRequired -> "ConsentRequired"
+                        is ExerciseRouteResult.NoData -> "NoData"
+                        else -> "?"
                     }
-                    is ExerciseRouteResult.ConsentRequired -> "ConsentRequired"
-                    is ExerciseRouteResult.NoData -> "NoData"
-                    else -> "?"
-                }
-            } catch (e: Exception) { "ERR ${e.message}" }
-            android.util.Log.i("ROUTEDBG", "${sourceLabel(s)} ${s.startTime}: $msg")
-        }
+                } catch (e: Exception) { "ERR ${e.message}" }
+                sb.append("${sourceLabel(s)} ${s.startTime}: $msg\n")
+            }
+        } catch (e: Exception) { sb.append("FATAL ${e.message}") }
+        context.getSharedPreferences("running_coach", Context.MODE_PRIVATE)
+            .edit().putString("route_debug", sb.toString()).apply()
     }
 
     /** 특정 종류의 최근 운동 목록 (최신순) */

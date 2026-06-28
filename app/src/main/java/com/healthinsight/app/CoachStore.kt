@@ -14,6 +14,7 @@ data class UsageLog(val time: Long, val kind: String, val provider: String, val 
 data class LiveSession(
     val start: Long, val end: Long, val distM: Double, val elevGainM: Double, val elevLossM: Double,
     val hrMax: Int, val gradeMax: Int, val timeline: List<String>,
+    val track: List<Pair<Double, Double>> = emptyList(),  // GPS 경로(위도,경도) — 지도 고도 보정용
 ) {
     val durationSec: Long get() = (end - start) / 1000
     /** 같은 러닝인지 (시간대 겹침) */
@@ -182,8 +183,12 @@ class CoachStore(context: Context) {
                 val o = arr.getJSONObject(i)
                 val tl = o.optJSONArray("tl")
                 val timeline = if (tl != null) (0 until tl.length()).map { tl.getString(it) } else emptyList()
+                val rt = o.optJSONArray("rt")
+                val track = if (rt != null) (0 until rt.length()).map {
+                    val p = rt.getJSONArray(it); p.getDouble(0) to p.getDouble(1)
+                } else emptyList()
                 LiveSession(o.getLong("s"), o.getLong("e"), o.getDouble("d"), o.getDouble("el"), o.optDouble("lo", 0.0),
-                    o.getInt("hr"), o.getInt("g"), timeline)
+                    o.getInt("hr"), o.getInt("g"), timeline, track)
             }
         } catch (e: Exception) { emptyList() }
     }
@@ -193,14 +198,23 @@ class CoachStore(context: Context) {
         cur.add(ls)
         val arr = JSONArray()
         cur.takeLast(50).forEach { l ->
+            val rt = JSONArray(); l.track.forEach { rt.put(JSONArray().put(it.first).put(it.second)) }
             arr.put(JSONObject().put("s", l.start).put("e", l.end).put("d", l.distM).put("el", l.elevGainM).put("lo", l.elevLossM)
-                .put("hr", l.hrMax).put("g", l.gradeMax).put("tl", JSONArray(l.timeline)))
+                .put("hr", l.hrMax).put("g", l.gradeMax).put("tl", JSONArray(l.timeline)).put("rt", rt))
         }
         prefs.edit().putString("live_sessions", arr.toString()).apply()
     }
 
     /** 주어진 시간대(운동)와 겹치는 라이브 세션 (코칭 합치기용) */
     fun liveSessionFor(start: Long, end: Long): LiveSession? = liveSessions().firstOrNull { it.overlaps(start, end) }
+
+    /** 지도 고도(DEM) 계산 결과 캐시 — 세션 시작시각 기준 (총오르막, 총내리막). 없으면 null */
+    fun demFor(start: Long): Pair<Double, Double>? {
+        val g = prefs.getFloat("dem_g_$start", -1f)
+        return if (g >= 0f) g.toDouble() to prefs.getFloat("dem_l_$start", 0f).toDouble() else null
+    }
+    fun setDem(start: Long, gain: Double, loss: Double) =
+        prefs.edit().putFloat("dem_g_$start", gain.toFloat()).putFloat("dem_l_$start", loss.toFloat()).apply()
 
     /** 앱을 마지막으로 연 날짜 — '오늘 첫 방문' 안내용 (fetch 여부와 무관) */
     var lastSeenDate: String

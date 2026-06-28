@@ -46,8 +46,10 @@ import androidx.core.content.ContextCompat
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.YearMonth
@@ -210,7 +212,6 @@ class MainActivity : ComponentActivity() {
                 val has = repo.hasAllPermissions()
                 ui.value = ui.value.copy(available = true, hasPermission = has)
                 if (has) {
-                    if (!repo.hasRoutePermission()) requestHc.launch(WorkoutRepository.PERMISSIONS) // 경로(고도 보정) 권한 추가 요청
                     loadCachedThenMaybeFetch()
                 }
             }
@@ -269,7 +270,6 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this@MainActivity, "최신 기록 불러오는 중...", Toast.LENGTH_SHORT).show()
             try {
                 val ws = repo.allWorkouts(120)
-                try { repo.debugRoutes(120) } catch (_: Exception) {} // 실험: 삼성 경로 제공 여부 logcat 확인
                 store.workoutsCache = WorkoutCache.toJson(ws)
                 store.lastFetchDate = java.time.LocalDate.now().toString()
                 val merged = mergeLiveOnly(ws)
@@ -372,15 +372,25 @@ class MainActivity : ComponentActivity() {
         store.recordAiCall()
         lifecycleScope.launch {
             val base = CoachPrompt.build(w, memo, profile, image != null)
-            // 같은 시간대 라이브 코치 세션이 있으면 상세(고도·경사·심박 타임라인)를 합침
+            // 같은 시간대 라이브 코치 세션이 있으면 상세(고도·심박 타임라인)를 합침
             val live = if (w.type == ExerciseType.RUNNING) store.liveSessionFor(w.start.toEpochMilli(), w.end.toEpochMilli()) else null
+            // GPS 경로가 있으면 지도 지형고도(DEM)로 정확한 오르막/내리막 계산(기압계 과대계상 대체, 결과 캐시)
+            val dem: Pair<Double, Double>? = live?.takeIf { it.track.isNotEmpty() }?.let { ls ->
+                store.demFor(ls.start) ?: withContext(Dispatchers.IO) {
+                    val e = ElevationApi.elevations(ls.track)
+                    if (e.isNotEmpty()) ElevationApi.gainLoss(e).also { store.setDem(ls.start, it.first, it.second) } else null
+                }
+            }
             val prompt = if (live != null) buildString {
                 append(base)
-                append("\n\n[라이브 코치 동행 상세 — 폰 기압계·BLE 심박, 헬스커넥트보다 세밀]\n")
-                append("총 오르막 +${"%.0f".format(live.elevGainM)}m · 총 내리막 -${"%.0f".format(live.elevLossM)}m · 최대 경사 ${live.gradeMax}% · 최대 심박 ${live.hrMax}bpm\n")
+                val gain = dem?.first ?: live.elevGainM
+                val loss = dem?.second ?: live.elevLossM
+                val src = if (dem != null) "지도 지형고도(DEM·정확)" else "폰 기압계(오차 있음)"
+                append("\n\n[라이브 코치 동행 상세 — BLE 심박 + GPS 경로 지도고도, 헬스커넥트보다 세밀]\n")
+                append("총 오르막 +${"%.0f".format(gain)}m · 총 내리막 -${"%.0f".format(loss)}m (${src}) · 최대 심박 ${live.hrMax}bpm\n")
                 append("※ 순고도(오르막-내리막)로 보지 말 것. 총 오르막=심폐 부하, 총 내리막=근골격·제동 데미지(급경사 내리막은 심박은 풀려도 속도 못 냄). 순고도가 0이어도 둘 다 크면 실제 부담이 큼.\n")
                 if (live.timeline.isNotEmpty()) {
-                    append("타임라인(음성 코칭 시점·심박·페이스·경사):\n")
+                    append("타임라인(음성 코칭 시점·심박·페이스):\n")
                     live.timeline.forEach { append(it).append("\n") }
                 }
                 append("위 라이브 상세(특히 오르막·내리막 분리)를 삼성 거리 기록과 합쳐서, 후반 페이스 하락이 오르막 때문인지·내리막 제동 때문인지 등 '왜'를 정확히 해석해줘.\n")

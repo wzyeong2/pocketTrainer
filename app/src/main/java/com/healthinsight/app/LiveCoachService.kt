@@ -109,6 +109,8 @@ class LiveCoachService : Service() {
     private var lastSampleSec = 0L      // 타임라인 샘플 주기
     private var hrMaxSeen = 0
     private var gradeMaxSeen = 0
+    private val track = mutableListOf<Pair<Double, Double>>()  // GPS 경로(위도,경도) — 지도 고도(DEM) 보정용
+    private var lastTrackLoc: Location? = null
 
     private fun addTimeline(s: String) {
         if (LiveCoach.timeline.size < 150) LiveCoach.timeline = LiveCoach.timeline + s
@@ -139,7 +141,7 @@ class LiveCoachService : Service() {
         hrOver = false; lastHrAlertMs = 0L
         altInit = false; curAlt = 0.0; altRef = 0.0; altRefDown = 0.0; gradeWindow.clear(); lastGradeCueMs = 0L
         lastSampleSec = 0L; LiveCoach.timeline = emptyList(); hrMaxSeen = 0; gradeMaxSeen = 0
-        LiveCoach.elevLossM = 0.0
+        LiveCoach.elevLossM = 0.0; track.clear(); lastTrackLoc = null
         LiveCoach.phase = "running"
         LiveCoach.distM = 0.0; LiveCoach.elapsedSec = 0; LiveCoach.kmDone = 0
         LiveCoach.curPace = 0; LiveCoach.avgPace = 0; LiveCoach.cue = "코칭 준비 중..."
@@ -163,6 +165,11 @@ class LiveCoachService : Service() {
             val last = lastLoc
             if (last != null) { val d = haversine(last, loc); if (d < 50) LiveCoach.distM += d }
             lastLoc = loc
+            // 지도 고도 보정용 경로: 약 40m마다 한 점(최대 250점) — DEM 해상도(~30~90m)에 충분
+            val lt = lastTrackLoc
+            if (lt == null || haversine(lt, loc) >= 40f) {
+                if (track.size < 250) { track.add(loc.latitude to loc.longitude); lastTrackLoc = loc }
+            }
         }
         try { lm?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener!!) }
         catch (e: SecurityException) { LiveCoach.cue = "⚠️ 위치 권한 오류" }
@@ -239,12 +246,14 @@ class LiveCoachService : Service() {
         val start = gradeWindow.first()
         val dh = LiveCoach.distM - start.first
         if (dh < 15.0) return  // 수평 이동이 충분치 않으면 경사 판단 보류
-        val grade = ((curAlt - start.second) / dh * 100).roundToInt().coerceIn(-40, 40)
+        val dAlt = curAlt - start.second
+        val grade = (dAlt / dh * 100).roundToInt().coerceIn(-40, 40)
         LiveCoach.gradePct = grade
-        if (now - lastGradeCueMs > 45000) {
+        // 기압계는 노이즈가 커서(평지에서 가짜 4~5% 튐) 실제 고도변화 3m 이상 + 경사 7% 이상일 때만 음성 안내
+        if (now - lastGradeCueMs > 45000 && kotlin.math.abs(dAlt) >= 3.0) {
             when {
-                grade >= 4 -> { lastGradeCueMs = now; val m = "${grade}퍼센트 오르막이야. 페이스 욕심내지 말고 심박 지켜"; LiveCoach.cue = "⛰️ $m"; speak(m) }
-                grade <= -4 -> { lastGradeCueMs = now; val m = "내리막이야. 보폭 짧게, 무릎 보호하면서 가자"; LiveCoach.cue = "🏞️ $m"; speak(m) }
+                grade >= 7 -> { lastGradeCueMs = now; val m = "${grade}퍼센트 오르막이야. 페이스 욕심내지 말고 심박 지켜"; LiveCoach.cue = "⛰️ $m"; speak(m) }
+                grade <= -7 -> { lastGradeCueMs = now; val m = "내리막이야. 보폭 짧게, 무릎 보호하면서 가자"; LiveCoach.cue = "🏞️ $m"; speak(m) }
             }
         }
     }
@@ -431,6 +440,7 @@ class LiveCoachService : Service() {
                         hrMax = hrMaxSeen,
                         gradeMax = gradeMaxSeen,
                         timeline = LiveCoach.timeline,
+                        track = track.toList(),
                     )
                 )
             } catch (_: Exception) {}
